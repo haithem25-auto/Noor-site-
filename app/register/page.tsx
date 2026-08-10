@@ -18,12 +18,12 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  
+
   // الحالات الجديدة للواجهة: الإمام، شيخ الزاوية، أو مدير المدرسة القرآنية
-  const [uiRole, setUiRole] = useState("imam"); 
+  const [uiRole, setUiRole] = useState("imam");
   const [mosqueName, setMosqueName] = useState("");
 
-  // حالات جغرافية مضافة للامتثال للتعبئة التلقائية من الخريطة
+  // حالات جغرافية مضافة للامتثال للتعبئة التلقائية أو اليدوية
   const [mosqueCity, setMosqueCity] = useState("");
   const [mosqueAddress, setMosqueAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
@@ -33,15 +33,21 @@ export default function RegisterPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [suggestions, setSuggestions] = useState<any[]>([]);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([36.1912, 5.4124]); // سطيف كمركز افتراضي
+  const [mapCenter, setMapCenter] = useState<[number, number]>([
+    36.1912, 5.4124,
+  ]); // سطيف كمركز افتراضي
   const [hasSelectedMosque, setHasSelectedMosque] = useState(false);
   const [geoError, setGeoError] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
 
-  // دالة البحث التلقائي في خريطة OpenStreetMap المجانية
+  // دالة البحث التلقائي في خريطة OpenStreetMap المجانية (خاصة بالإمام وشيخ الزاوية فقط)
   useEffect(() => {
-    if (searchQuery.trim().length < 4 || hasSelectedMosque) {
+    if (
+      uiRole === "school" ||
+      searchQuery.trim().length < 4 ||
+      hasSelectedMosque
+    ) {
       setSuggestions([]);
       return;
     }
@@ -65,7 +71,7 @@ export default function RegisterPage() {
     }, 600);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, hasSelectedMosque]);
+  }, [searchQuery, hasSelectedMosque, uiRole]);
 
   // دالة لتوليد الرابط الفريد (Slug) آلياً من اسم المقر بطريقة ديناميكية آمنة
   const generateSlug = (name: string): string => {
@@ -80,23 +86,27 @@ export default function RegisterPage() {
     return `${cleanText}-${randomId}`;
   };
 
-  // عند اختيار المؤسسة الحقيقية من القائمة - التعبئة التلقائية الفورية للأعمدة الجغرافية
+  // عند اختيار المؤسسة الحقيقية من القائمة (للخريطة)
   const handleSelectSuggestion = (item: any) => {
     const lat = parseFloat(item.lat);
     const lon = parseFloat(item.lon);
     const cleanName = item.display_name.split(",")[0] || "المؤسسة المستهدفة";
 
-    // استخلاص اسم المدينة/البلدية أو الولاية آلياً من تفاصيل العنوان المرتجع
-    const city = item.address?.city || item.address?.town || item.address?.village || item.address?.state || "غير محدد";
+    const city =
+      item.address?.city ||
+      item.address?.town ||
+      item.address?.village ||
+      item.address?.state ||
+      "غير محدد";
     const fullAddress = item.display_name || "العنوان الكامل عبر الخريطة";
 
     setMapCenter([lat, lon]);
     setLatitude(lat);
     setLongitude(lon);
-    setMosqueName(cleanName); 
+    setMosqueName(cleanName);
     setMosqueCity(city);
     setMosqueAddress(fullAddress);
-    setSearchQuery(item.display_name); 
+    setSearchQuery(item.display_name);
     setHasSelectedMosque(true);
     setSuggestions([]);
   };
@@ -107,73 +117,83 @@ export default function RegisterPage() {
       alert("يرجى ملء كافة الحقول الأساسية أولاً.");
       return;
     }
-    setCurrentStep(2); 
+    setCurrentStep(2);
   };
 
   // عملية التسجيل وحقن البيانات التلقائية المتكاملة في جداول قاعدة البيانات
   async function handleRegister() {
-    if (!mosqueName || !latitude || !longitude) {
-      setGeoError("عذراً، يجب عليك اختيار المكان الحقيقي المسجل على الخريطة أولاً لتأكيد الحساب.");
-      return;
+    if (uiRole === "school") {
+      if (!mosqueName.trim() || !mosqueCity.trim() || !mosqueAddress.trim()) {
+        setGeoError("يرجى ملء كافة بيانات المدرسة القرآنية المطلوبة.");
+        return;
+      }
+    } else {
+      if (!mosqueName || !latitude || !longitude) {
+        setGeoError(
+          "عذراً، يجب عليك اختيار المكان الحقيقي المسجل على الخريطة أولاً لتأكيد الحساب."
+        );
+        return;
+      }
     }
 
     try {
       setRegisterLoading(true);
       setGeoError("");
 
-      // 1. إنشاء حساب الإمام في نظام مصادقة سوبابيس (Auth)
+      // 1. إنشاء حساب المستعمل في نظام مصادقة سوبابيس (Auth)
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
         password: password,
       });
 
       if (authError) throw authError;
-      if (!authData.user) throw new Error("فشل إنشاء حساب المستخدم في نظام المصادقة.");
+      if (!authData.user)
+        throw new Error("فشل إنشاء حساب المستخدم في نظام المصادقة.");
 
       const imamUserId = authData.user.id;
 
-      // 2. إدخال الإمام أولاً في جدول profiles لتجنب كسر قيد الـ Foreign Key للمسجد
+      // 2. إدخال المستخدم أولاً في جدول profiles لتجنب كسر قيد الـ Foreign Key للمسجد/المدرسة
       const { error: profileInitialErr } = await supabase
         .from("profiles")
         .insert({
           id: imamUserId,
           full_name: fullName.trim(),
-          role: "imam", 
+          role: "imam", // تم التثبيت على "imam" لتجنب خطأ الـ Check Constraint
           email: email.trim(),
           mosque_id: null, // نتركه فارغاً مؤقتاً لكسر حلقة التبعية المغلقة
-          mosque_name: mosqueName, 
+          mosque_name: mosqueName.trim(),
         });
 
       if (profileInitialErr) throw profileInitialErr;
 
       // 3. توليد الـ slug الديناميكي تلقائياً
-      const generatedSlug = generateSlug(mosqueName);
+      const generatedSlug = generateSlug(mosqueName.trim());
 
-      // 4. الآن يمكن إدخال المسجد بأمان تام لأن الـ imam_id أصبح موجوداً في جدول profiles!
+      // 4. إدخال المدرسة/المسجد في جدول mosques
       const { data: mosqueData, error: mosqueInsertError } = await supabase
         .from("mosques")
         .insert({
-          name: mosqueName,
-          city: mosqueCity,
-          address: mosqueAddress,
-          formatted_address: mosqueAddress,
+          name: mosqueName.trim(),
+          city: mosqueCity.trim(),
+          address: mosqueAddress.trim(),
+          formatted_address: mosqueAddress.trim(),
           latitude: latitude,
           longitude: longitude,
           slug: generatedSlug,
-          imam_id: imamUserId // تم الربط بأمان الآن
+          imam_id: imamUserId, // تم الربط بأمان الآن
         })
         .select("id")
         .single();
 
       if (mosqueInsertError) {
-        // في حال فشل إدخال المسجد نضمن تنظيف حساب الـ profile الذي أنشئ مؤقتاً
+        // في حال فشل الإدخال نضمن تنظيف حساب الـ profile الذي أنشئ مؤقتاً
         await supabase.from("profiles").delete().eq("id", imamUserId);
         throw mosqueInsertError;
       }
-      
+
       const newMosqueId = mosqueData.id;
 
-      // 5. الخطوة الأخيرة: تحديث حساب الإمام بالـ mosque_id الفعلي المولد
+      // 5. الخطوة الأخيرة: تحديث حساب المستخدم بالـ mosque_id الفعلي المولد
       const { error: profileUpdateErr } = await supabase
         .from("profiles")
         .update({ mosque_id: newMosqueId })
@@ -181,9 +201,11 @@ export default function RegisterPage() {
 
       if (profileUpdateErr) throw profileUpdateErr;
 
-      alert(`🎉 تم اعتماد وتثبيت المقر الرسمي بنجاح!\nالرابط المخصص لمسجدك ونظام نور هو:\n/mosques/${generatedSlug}`);
-      
-      // إعادة تعيين كافة الحقول بعد النجاح المطلق والربط المتكامل
+      alert(
+        `🎉 تم اعتماد وتثبيت المقر الرسمي بنجاح!\nالرابط المخصص لنظام نور هو:\n/mosques/${generatedSlug}`
+      );
+
+      // إعادة تعيين كافة الحقول بعد النجاح
       setCurrentStep(1);
       setFullName("");
       setEmail("");
@@ -195,10 +217,13 @@ export default function RegisterPage() {
       setHasSelectedMosque(false);
       setLatitude(null);
       setLongitude(null);
-
     } catch (err: any) {
       console.error("خطأ مجمع أثناء عملية التسجيل البرمجية:", err);
-      setGeoError(`فشل إتمام عملية التسجيل التلقائية: ${err.message || "حدث خطأ داخلي في نظام الجداول"}`);
+      setGeoError(
+        `فشل إتمام عملية التسجيل التلقائية: ${
+          err.message || "حدث خطأ داخلي في نظام الجداول"
+        }`
+      );
     } finally {
       setRegisterLoading(false);
     }
@@ -217,15 +242,20 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[#f8fafc] p-6 text-slate-800" dir="rtl">
-      
+    <main
+      className="min-h-screen flex items-center justify-center bg-[#f8fafc] p-6 text-slate-800"
+      dir="rtl"
+    >
       <div className="bg-white rounded-3xl p-8 shadow-xl w-full max-w-xl border border-slate-100 transition-all duration-300">
-        
         {/* الخطوة الأولى: الحساب والبيانات الأساسية */}
         {currentStep === 1 && (
           <form onSubmit={handleFirstStepSubmit}>
-            <h1 className="text-3xl font-black mb-2 text-center text-slate-900">إنشاء حساب جديد</h1>
-            <p className="text-center text-sm text-slate-500 mb-8">انضم إلى منصة نور لإدارة وتوسيع نطاق التعليم القرآني</p>
+            <h1 className="text-3xl font-black mb-2 text-center text-slate-900">
+              إنشاء حساب جديد
+            </h1>
+            <p className="text-center text-sm text-slate-500 mb-8">
+              انضم إلى منصة نور لإدارة وتوسيع نطاق التعليم القرآني
+            </p>
 
             <div className="space-y-4">
               <input
@@ -238,7 +268,9 @@ export default function RegisterPage() {
               />
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 mr-2">نوع صفة الاشتراك والتسجيل:</label>
+                <label className="text-xs font-bold text-slate-500 mr-2">
+                  نوع صفة الاشتراك والتسجيل:
+                </label>
                 <select
                   value={uiRole}
                   onChange={(e) => setUiRole(e.target.value)}
@@ -272,18 +304,118 @@ export default function RegisterPage() {
                 type="submit"
                 className="w-full bg-[#047857] hover:bg-[#065f46] text-white h-14 rounded-2xl font-bold transition-colors shadow-sm mt-4 flex items-center justify-center gap-2"
               >
-                التالي (التحقق من المقر عبر الخريطة) ──►
+                {uiRole === "school"
+                  ? "التالي (إدخال بيانات المدرسة القرآنية) ──►"
+                  : "التالي (التحقق من المقر عبر الخريطة) ──►"}
               </button>
             </div>
           </form>
         )}
 
-        {/* الخطوة الثانية: خريطة التحقق والالتقاط التلقائي لاسم المقر الفعلي والأعمدة الجغرافية والـ Slug */}
-        {currentStep === 2 && (
+        {/* الخطوة الثانية: الإدخال اليدوي للمدرسة القرآنية */}
+        {currentStep === 2 && uiRole === "school" && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-black text-slate-900">التحقق من وجود المقر الفعلي</h2>
-              <p className="text-slate-500 text-sm mt-1">ابحث عن المقر رسميّاً على الخريطة ليقوم النظام باعتماده تلقائياً ومنع التسجيل العشوائي 🔒</p>
+              <h2 className="text-2xl font-black text-slate-900">
+                بيانات المدرسة القرآنية
+              </h2>
+              <p className="text-slate-500 text-sm mt-1">
+                أدخل بيانات الموقع والمدرسة القرآنية يدويّاً 🏫
+              </p>
+            </div>
+
+            {geoError && (
+              <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-800 text-sm font-semibold text-center">
+                {geoError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-slate-700">
+                  اسم المدرسة القرآنية الرسمي:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثال: مدرسة الفرقان القرآنية"
+                  value={mosqueName}
+                  onChange={(e) => setMosqueName(e.target.value)}
+                  className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-slate-700">
+                  المدينة / البلدية:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثال: سطيف"
+                  value={mosqueCity}
+                  onChange={(e) => setMosqueCity(e.target.value)}
+                  className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-bold text-slate-700">
+                  العنوان التفصيلي:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثال: حي 500 مسكن، طريق عين تبينت"
+                  value={mosqueAddress}
+                  onChange={(e) => setMosqueAddress(e.target.value)}
+                  className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 pt-2">
+              <button
+                onClick={handleRegister}
+                disabled={
+                  !mosqueName.trim() ||
+                  !mosqueCity.trim() ||
+                  !mosqueAddress.trim() ||
+                  registerLoading
+                }
+                className="flex-1 bg-[#047857] hover:bg-[#065f46] text-white h-14 rounded-2xl font-bold transition-colors shadow-sm disabled:opacity-50 text-sm sm:text-base"
+              >
+                {registerLoading
+                  ? "جاري إكمال وتأمين الحساب..."
+                  : "تأكيد واعتماد المدرسة القرآنية 🔐"}
+              </button>
+              <button
+                onClick={() => {
+                  setCurrentStep(1);
+                  setMosqueName("");
+                  setMosqueCity("");
+                  setMosqueAddress("");
+                }}
+                disabled={registerLoading}
+                className="px-6 h-14 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition-colors text-sm sm:text-base"
+              >
+                السابق
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* الخطوة الثانية: خريطة التحقق للإمام أو شيخ الزاوية */}
+        {currentStep === 2 && uiRole !== "school" && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-black text-slate-900">
+                التحقق من وجود المقر الفعلي
+              </h2>
+              <p className="text-slate-500 text-sm mt-1">
+                ابحث عن المقر رسميّاً على الخريطة ليقوم النظام باعتماده تلقائياً
+                ومنع التسجيل العشوائي 🔒
+              </p>
             </div>
 
             {geoError && (
@@ -293,7 +425,12 @@ export default function RegisterPage() {
             )}
 
             <div className="space-y-2 relative">
-              <label htmlFor="mosque-search-input" className="text-sm font-bold text-slate-700">ابحث عن الموقع بدقة:</label>
+              <label
+                htmlFor="mosque-search-input"
+                className="text-sm font-bold text-slate-700"
+              >
+                ابحث عن الموقع بدقة:
+              </label>
               <input
                 id="mosque-search-input"
                 name="mosque_search"
@@ -312,8 +449,12 @@ export default function RegisterPage() {
                 }}
                 className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
               />
-              
-              {searchLoading && <div className="text-xs text-emerald-600 font-bold mt-1 animate-pulse">جاري فحص قاعدة البيانات الجغرافية...</div>}
+
+              {searchLoading && (
+                <div className="text-xs text-emerald-600 font-bold mt-1 animate-pulse">
+                  جاري فحص قاعدة البيانات الجغرافية...
+                </div>
+              )}
 
               {suggestions.length > 0 && (
                 <div className="absolute z-[1000] w-full bg-white border border-slate-100 rounded-2xl shadow-xl max-h-60 overflow-y-auto mt-1 divide-y divide-slate-50">
@@ -330,20 +471,29 @@ export default function RegisterPage() {
               )}
             </div>
 
-            {/* الحاوية المستدعية للمكون الديناميكي الجديد المحمي بـ key فريد */}
+            {/* الحاوية المستدعية للمكون الديناميكي المحمي بـ key فريد */}
             <div className="rounded-2xl overflow-hidden border border-slate-100 h-64 shadow-inner z-10 relative">
-              <LeafletMap 
-                key={`${mapCenter[0]}-${mapCenter[1]}`} 
-                center={mapCenter} 
-                zoom={hasSelectedMosque ? 16 : 6} 
+              <LeafletMap
+                key={`${mapCenter[0]}-${mapCenter[1]}`}
+                center={mapCenter}
+                zoom={hasSelectedMosque ? 16 : 6}
               />
             </div>
 
             {mosqueName && (
               <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 space-y-1.5">
-                <p className="text-xs text-emerald-800 font-bold">✓ {getLabelText()}</p>
-                <p className="text-base text-slate-800 font-black">🕌 {mosqueName}</p>
-                <p className="text-xs text-slate-500 font-medium">📍 المدينة المستخرجة: <span className="font-bold text-slate-700">{mosqueCity}</span></p>
+                <p className="text-xs text-emerald-800 font-bold">
+                  ✓ {getLabelText()}
+                </p>
+                <p className="text-base text-slate-800 font-black">
+                  🕌 {mosqueName}
+                </p>
+                <p className="text-xs text-slate-500 font-medium">
+                  📍 المدينة المستخرجة:{" "}
+                  <span className="font-bold text-slate-700">
+                    {mosqueCity}
+                  </span>
+                </p>
               </div>
             )}
 
@@ -353,7 +503,9 @@ export default function RegisterPage() {
                 disabled={!hasSelectedMosque || registerLoading}
                 className="flex-1 bg-[#047857] hover:bg-[#065f46] text-white h-14 rounded-2xl font-bold transition-colors shadow-sm disabled:opacity-50 text-sm sm:text-base"
               >
-                {registerLoading ? "جاري بناء وتأمين حساب المسجد..." : "تأكيد واعتماد المقر الرسمي 🔐"}
+                {registerLoading
+                  ? "جاري بناء وتأمين الحساب..."
+                  : "تأكيد واعتماد المقر الرسمي 🔐"}
               </button>
               <button
                 onClick={() => {
@@ -373,7 +525,6 @@ export default function RegisterPage() {
             </div>
           </div>
         )}
-
       </div>
     </main>
   );
