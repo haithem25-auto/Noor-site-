@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import dynamic from "next/dynamic";
 
@@ -15,6 +16,8 @@ const LeafletMap = dynamic(() => import("../components/LeafletMap"), {
 });
 
 export default function RegisterPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -73,17 +76,39 @@ export default function RegisterPage() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, hasSelectedMosque, uiRole]);
 
-  // دالة لتوليد الرابط الفريد (Slug) آلياً من اسم المقر بطريقة ديناميكية آمنة
+  // دالة تحويل الحروف العربية إلى إنجليزية (Transliteration) معالجة وشاملة
+  const arabicToLatin = (text: string): string => {
+    const map: { [key: string]: string } = {
+      أ: "a", إ: "a", آ: "a", ا: "a", ب: "b", ت: "t", ث: "th", ج: "j",
+      ح: "h", خ: "kh", د: "d", ذ: "dh", ر: "r", ز: "z", س: "s", ش: "sh",
+      ص: "s", ض: "d", ط: "t", ظ: "z", ع: "a", غ: "gh", ف: "f", ق: "q",
+      ك: "k", ل: "l", م: "m", ن: "n", هـ: "h", ه: "h", و: "w", ي: "y",
+      ى: "a", ة: "h", ء: "a", ئ: "y", ؤ: "w", " ": "-"
+    };
+
+    return text
+      .split("")
+      .map((char) => map[char] || char)
+      .join("");
+  };
+
+  // دالة توليد الـ Slug اللاتيني الصافي (مخصص للروابط والـ QR Code)
   const generateSlug = (name: string): string => {
-    let cleanText = name
+    const latinText = arabicToLatin(name);
+
+    const cleanSlug = latinText
       .toLowerCase()
       .trim()
-      .replace(/[\s_]+/g, "-") // استبدال الفراغات بشرطات
-      .replace(/[^\u0621-\u064A0-9a-zA-Z\-]/g, ""); // تنظيف الرموز الخاصة التي تكسر الروابط
+      .replace(/[^a-z0-9\s-]/g, "") // إزالة أي رموز غير لاتينية
+      .replace(/[\s_]+/g, "-")       // تحويل المسافات إلى شرطات
+      .replace(/-+/g, "-")          // دمج الشرطات المتعددة
+      .replace(/^-+|-+$/g, "");     // قص الشرطات من البداية والنهاية
 
-    // إلحاق معرّف عشوائي فريد لمنع تشابه الروابط نهائياً في البيئة الحية
-    const randomId = Math.random().toString(36).substring(2, 7);
-    return `${cleanText}-${randomId}`;
+    // توليد معرف عشوائي قصير يتكون من 4 أرقام وحروف لاتينية
+    const randomId = Math.random().toString(36).substring(2, 6);
+
+    const baseName = cleanSlug || "mosque";
+    return `${baseName}-${randomId}`;
   };
 
   // عند اختيار المؤسسة الحقيقية من القائمة (للخريطة)
@@ -166,7 +191,7 @@ export default function RegisterPage() {
 
       if (profileInitialErr) throw profileInitialErr;
 
-      // 3. توليد الـ slug الديناميكي تلقائياً
+      // 3. توليد الـ slug الإنجليزي الديناميكي تلقائياً لاستخدامه مستقبلاً في روابط التسجيل و الـ QR
       const generatedSlug = generateSlug(mosqueName.trim());
 
       // 4. إدخال المدرسة/المسجد في جدول mosques
@@ -201,22 +226,9 @@ export default function RegisterPage() {
 
       if (profileUpdateErr) throw profileUpdateErr;
 
-      alert(
-        `🎉 تم اعتماد وتثبيت المقر الرسمي بنجاح!\nالرابط المخصص لنظام نور هو:\n/mosques/${generatedSlug}`
-      );
+      // التوجيه المباشر إلى لوحة التحكم الخاصة بالمشرف فور نجاح التسجيل
+      router.push("/dashboard");
 
-      // إعادة تعيين كافة الحقول بعد النجاح
-      setCurrentStep(1);
-      setFullName("");
-      setEmail("");
-      setPassword("");
-      setMosqueName("");
-      setMosqueCity("");
-      setMosqueAddress("");
-      setSearchQuery("");
-      setHasSelectedMosque(false);
-      setLatitude(null);
-      setLongitude(null);
     } catch (err: any) {
       console.error("خطأ مجمع أثناء عملية التسجيل البرمجية:", err);
       setGeoError(

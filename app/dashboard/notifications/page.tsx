@@ -7,6 +7,7 @@ import Sidebar from "@/app/components/dashboard/Sidebar";
 interface notification {
   id: string;
   user_id: string;
+  mosque_id: string;
   title: string;
   message: string;
   is_read: boolean;
@@ -23,22 +24,38 @@ export default function NotificationsPage() {
     fetchNotifications();
   }, []);
 
-  const fetchNotifications = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("id, user_id, title, message, is_read, is_sent, created_at")
-        .order("created_at", { ascending: false });
+const fetchNotifications = async () => {
+  try {
+    setLoading(true);
 
-      if (error) throw error;
-      setNotifications(data || []);
-    } catch (error) {
-      console.error("Error fetching notifications:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // 1. جلب بيانات المستخدم الحالي
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 2. جلب mosque_id الخاص بالمستخدم من جدول profiles
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("mosque_id")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile?.mosque_id) return;
+
+    // 3. جلب الإشعارات الخاصة بهذا المسجد فقط
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("id, user_id, mosque_id, title, message, is_read, is_sent, created_at")
+      .eq("mosque_id", profile.mosque_id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    setNotifications(data || []);
+  } catch (error) {
+    console.error("Error fetching notifications:", error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // تجاوز فحص الأنواع الصارم للمكون لإنهاء مشكلة IntrinsicAttributes هنا مباشرة
   const SidebarComponent = Sidebar as any;

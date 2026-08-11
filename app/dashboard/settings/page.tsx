@@ -31,30 +31,43 @@ export default function SettingsPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      
-      // 1. جلب قائمة المعلمين (من جدول profiles حيث الدور معلم)
+
+      // 1. الحصول على المستخدم الحالي ومسجده
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("mosque_id")
+        .eq("id", user.id)
+        .single();
+
+      if (!profile?.mosque_id) return;
+
+      // 2. جلب معلمي هذا المسجد فقط
       const { data: teachersData } = await supabase
         .from("profiles")
         .select("id, full_name")
-        .eq("role", "teacher");
+        .eq("role", "teacher")
+        .eq("mosque_id", profile.mosque_id);
 
-      // 2. جلب قائمة الطلاب مع ربط الحلقات لحساب عدد الغيابات أو الحذف بتقدير الإمام
+      // 3. جلب طلاب هذا المسجد فقط مع بيانات الحلقة
       const { data: studentsData } = await supabase
         .from("students")
         .select(`
           id,
           full_name,
           halaqat:halaqa_id ( name )
-        `);
+        `)
+        .eq("mosque_id", profile.mosque_id);
 
       setTeachers(teachersData || []);
       
-      // تنسيق بيانات الطلاب
       const formattedStudents = studentsData?.map((student: any) => ({
         id: student.id,
         full_name: student.full_name,
         halaqa_name: student.halaqat?.name || "غير مسجل في حلقة",
-        absences_count: Math.floor(Math.random() * 5), // يمكنك ربطه بجدول attendance الحقيقي لاحقاً
+        absences_count: Math.floor(Math.random() * 5),
       })) || [];
 
       setStudents(formattedStudents);
@@ -65,7 +78,6 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔥 1. دالة إنهاء مهام الإمام الحالي (حذف حسابه مع الحفاظ على المسجد والبيانات)
   const handleImamHandover = async () => {
     const confirmAction = confirm(
       "تحذير حرج جداً: هل أنت متأكد من إنهاء مهامك كإمام؟ سيتم فك ارتباطك بهذا المسجد تماماً وحذف حسابك من المنصة دون المساس ببيانات المعلمين والحلقات والطلاب."
@@ -73,15 +85,12 @@ export default function SettingsPage() {
     if (!confirmAction) return;
 
     try {
-      // الحصول على المعرف الخاص بالمستخدم الحالي
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // تنفيذ الحذف الآمن للملف الشخصي للإمام (البيانات الأخرى محفوظة بفضل علاقات الجداول والـ Cascade المضبوط يدويًا)
       const { error } = await supabase.from("profiles").delete().eq("id", user.id);
       if (error) throw error;
 
-      // تسجيل الخروج والتوجه لصفحة البداية
       await supabase.auth.signOut();
       window.location.href = "/";
     } catch (error) {
@@ -90,7 +99,6 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔥 2. دالة إنهاء مهام معلم (تحويل الحلقات والطلاب لوضع الانتظار)
   const handleTeacherHandover = async (teacherId: string) => {
     const confirmAction = confirm(
       "هل أنت متأكد من إنهاء مهام هذا المعلم؟ ستبقى الحلقات والتلاميذ مسجلين في النظام بانتظار تعيين معلم آخر."
@@ -98,7 +106,6 @@ export default function SettingsPage() {
     if (!confirmAction) return;
 
     try {
-      // تحديث جدول الحلقات لجعل المعرف فارغاً (وضع الانتظار لحين قدوم معلم جديد)
       const { error: halaqatError } = await supabase
         .from("halaqat")
         .update({ teacher_id: null })
@@ -106,7 +113,6 @@ export default function SettingsPage() {
 
       if (halaqatError) throw halaqatError;
 
-      // حذف حساب المعلم من جدول profiles
       const { error: profileError } = await supabase
         .from("profiles")
         .delete()
@@ -114,7 +120,6 @@ export default function SettingsPage() {
 
       if (profileError) throw profileError;
 
-      // تحديث الواجهة
       setTeachers(teachers.filter((t) => t.id !== teacherId));
       alert("تم إنهاء مهام المعلم بنجاح وتحويل حلقاته لوضعية الانتظار.");
     } catch (error) {
@@ -123,7 +128,6 @@ export default function SettingsPage() {
     }
   };
 
-  // 🔥 3. دالة حذف طالب من الحلقة بتقدير الإمام (بناءً على الغيابات أو السلوك)
   const handleDeleteStudent = async (studentId: string) => {
     const confirmAction = confirm("هل أنت متأكد من حذف هذا الطالب نهائياً من الحلقة بناءً على تقديرك الإشرافي؟");
     if (!confirmAction) return;
@@ -140,27 +144,56 @@ export default function SettingsPage() {
     }
   };
 
+  const SidebarComponent = Sidebar as any;
+
   return (
     <div className="flex min-h-screen bg-slate-50 text-right" dir="rtl">
-      {/* الشريط الجانبي الثابت */}
-      <div className="w-64 min-h-screen sticky top-0 hidden md:block z-20">
-        <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+      
+      {/* خلفية معتمة للهواتف عند فتح الشريط الجانبي */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/50 z-30 md:hidden transition-opacity"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* الشريط الجانبي (متوافق مع الشاشات الصغيرة والكبيرة) */}
+      <div className={`
+        fixed inset-y-0 right-0 z-40 w-64 bg-white transform transition-transform duration-300 ease-in-out
+        md:static md:translate-x-0 md:z-20
+        ${sidebarOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}
+      `}>
+        <SidebarComponent sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
       </div>
 
-      {/* المحتوى الرئيسي للوحة الإعدادات */}
-      <div className="flex-1 flex flex-col p-6 md:p-8 space-y-6 overflow-x-hidden">
+      {/* المحتوى الرئيسي */}
+      <div className="flex-1 flex flex-col p-4 md:p-8 space-y-6 overflow-x-hidden min-w-0">
+        
+        {/* شريط أعلى للجوال يفتح القائمة */}
+        <div className="flex items-center justify-between md:hidden pb-3 border-b border-slate-200">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg focus:outline-none"
+            aria-label="فتح القائمة"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <span className="font-semibold text-slate-800 text-sm">إعدادات النظام</span>
+        </div>
+
+        {/* رأس الصفحة */}
         <div className="border-b pb-5 border-slate-200/60">
-          <h1 className="text-2xl font-bold text-slate-800">إعدادات النظام والتحكم الحرج</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800">إعدادات النظام والتحكم الحرج</h1>
           <p className="text-sm text-slate-500 mt-1">
             إدارة صلاحيات إنهاء المهام (Handover) وفصل الطلاب بتقدير الإمام الإداري
           </p>
         </div>
 
         {/* أزرار التبديل بين التبويبات */}
-        <div className="flex gap-2 border-b border-slate-200">
+        <div className="flex gap-2 border-b border-slate-200 overflow-x-auto pb-1">
           <button
             onClick={() => setActiveTab("handover")}
-            className={`pb-3 px-4 text-sm font-medium transition-colors ${
+            className={`pb-3 px-4 text-sm font-medium whitespace-nowrap transition-colors ${
               activeTab === "handover"
                 ? "border-b-2 border-emerald-600 text-emerald-600"
                 : "text-slate-500 hover:text-slate-700"
@@ -170,7 +203,7 @@ export default function SettingsPage() {
           </button>
           <button
             onClick={() => setActiveTab("students")}
-            className={`pb-3 px-4 text-sm font-medium transition-colors ${
+            className={`pb-3 px-4 text-sm font-medium whitespace-nowrap transition-colors ${
               activeTab === "students"
                 ? "border-b-2 border-emerald-600 text-emerald-600"
                 : "text-slate-500 hover:text-slate-700"
@@ -181,19 +214,18 @@ export default function SettingsPage() {
         </div>
 
         {loading ? (
-          <div className="text-center py-12 text-slate-500">جاري تحميل البيانات الحرج...</div>
+          <div className="text-center py-12 text-slate-500">جاري تحميل البيانات الحساسة...</div>
         ) : activeTab === "handover" ? (
-          /* 🛑 التبويب الأول: أزرار إنهاء المهام الحساسة */
           <div className="space-y-6">
             {/* كرت إنهاء مهام الإمام */}
-            <div className="bg-white p-6 rounded-xl border border-rose-100 shadow-sm space-y-4">
+            <div className="bg-white p-5 md:p-6 rounded-xl border border-rose-100 shadow-sm space-y-4">
               <div className="flex items-start gap-3">
-                <div className="p-2 bg-rose-50 text-rose-600 rounded-lg">
+                <div className="p-2 bg-rose-50 text-rose-600 rounded-lg shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-rose-900">إنهاء مهام الإمام الحالي</h3>
-                  <p className="text-sm text-rose-600 mt-1">
+                  <h3 className="text-base md:text-lg font-bold text-rose-900">إنهاء مهام الإمام الحالي</h3>
+                  <p className="text-xs md:text-sm text-rose-600 mt-1">
                     يُستخدم عند صدور قرار بنقلكم لمسجد آخر. سيتم حذف حسابك الحالي ليتسنى للإمام الجديد التسجيل واستلام لوحة المسجد، مع إبقاء المعلمين والحلقات والطلاب كما هم دون أي تغيير.
                   </p>
                 </div>
@@ -201,7 +233,7 @@ export default function SettingsPage() {
               <div className="flex justify-end pt-2">
                 <button
                   onClick={handleImamHandover}
-                  className="bg-rose-600 hover:bg-rose-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg transition-colors shadow-sm"
+                  className="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white font-medium text-sm px-5 py-2.5 rounded-lg transition-colors shadow-sm"
                 >
                   تفعيل إنهاء مهام الإمام فورا
                 </button>
@@ -216,19 +248,19 @@ export default function SettingsPage() {
               </div>
               <div className="divide-y divide-slate-100">
                 {teachers.length === 0 ? (
-                  <div className="p-6 text-center text-slate-500 text-sm">لا يوجد معلمون مسجلون حالياً.</div>
+                  <div className="p-6 text-center text-slate-500 text-sm">لا يوجد معلمون مسجلون حالياً في هذا المسجد.</div>
                 ) : (
                   teachers.map((teacher) => (
-                    <div key={teacher.id} className="p-4 flex justify-between items-center hover:bg-slate-50/40 transition-colors">
+                    <div key={teacher.id} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 hover:bg-slate-50/40 transition-colors">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 font-medium text-sm">
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 font-medium text-sm shrink-0">
                           {teacher.full_name[0]}
                         </div>
                         <span className="font-medium text-slate-900">{teacher.full_name}</span>
                       </div>
                       <button
                         onClick={() => handleTeacherHandover(teacher.id)}
-                        className="text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-2 rounded-lg transition-colors"
+                        className="w-full sm:w-auto text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-2 rounded-lg transition-colors text-center"
                       >
                         إجراء إنهاء المهام
                       </button>
@@ -239,10 +271,9 @@ export default function SettingsPage() {
             </div>
           </div>
         ) : (
-          /* 🛑 التبويب الثاني: التحكم والتحجيم التقديري للطلاب من قبل الإمام */
           <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-right border-collapse">
+              <table className="w-full text-right border-collapse min-w-[600px]">
                 <thead>
                   <tr className="bg-slate-50 text-slate-600 text-sm font-semibold border-b border-slate-200/60">
                     <th className="p-4">اسم الطالب</th>
@@ -254,7 +285,7 @@ export default function SettingsPage() {
                 <tbody className="divide-y divide-slate-100 text-slate-700 text-sm">
                   {students.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="p-6 text-center text-slate-500">لا يوجد طلاب مسجلون حالياً</td>
+                      <td colSpan={4} className="p-6 text-center text-slate-500">لا يوجد طلاب مسجلون حالياً في هذا المسجد</td>
                     </tr>
                   ) : (
                     students.map((student) => (
