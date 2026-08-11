@@ -23,20 +23,30 @@ export default function StudentAttendanceReportsPage() {
       try {
         setLoading(true);
 
-        // 1️⃣ جلب بيانات ولي الأمر الحالي
+        // 1️⃣ جلب بيانات ولي الأمر الحالي ومعرف المسجد الخاص به
         const { data: { user }, error: authError } = await supabase.auth.getUser();
         if (authError || !user) {
           router.push("/");
           return;
         }
 
-        // 2️⃣ جلب أبناء الولي من جدول students
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("mosque_id")
+          .eq("id", user.id)
+          .single();
+
+        if (!profile?.mosque_id) {
+          setLoading(false);
+          return;
+        }
+
+        // 2️⃣ جلب أبناء الولي المنسوبين لنفس المسجد من جدول students
         const { data: studentsData, error: studentsError } = await supabase
           .from("students")
           .select("id, full_name")
-          .eq("parent_id", user.id);
-
-        console.log("1. الأبناء المرجعون من قاعدة البيانات:", studentsData);
+          .eq("parent_id", user.id)
+          .eq("mosque_id", profile.mosque_id);
 
         if (studentsError) {
           console.error("خطأ في جلب الأبناء:", studentsError);
@@ -57,17 +67,14 @@ export default function StudentAttendanceReportsPage() {
         });
 
         setStudentsMap(map);
-        console.log("2. مصفوفة IDs الأبناء المستهدفة:", studentIds);
 
-        // 3️⃣ جلب كافة سجلات الغياب الخاصة بالأبناء من جدول attendance
+        // 3️⃣ جلب كافة سجلات الغياب الخاصة بالأبناء والمحصورة بـ mosque_id
         const { data: attendanceData, error: attendanceError } = await supabase
           .from("attendance")
           .select("id, student_id, teacher_id, attendance_date, status, notes, created_at")
           .in("student_id", studentIds)
+          .eq("mosque_id", profile.mosque_id)
           .order("attendance_date", { ascending: false });
-
-        console.log("3. خطأ استعلام الغياب (إن وجد):", attendanceError);
-        console.log("4. سجلات الغياب المرجعة بالفعل:", attendanceData);
 
         if (attendanceError) {
           console.error("Error fetching attendance reports:", attendanceError);
@@ -103,8 +110,12 @@ export default function StudentAttendanceReportsPage() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#f8fafc] flex text-right font-sans relative">
+      {/* خلفية معتمة للشاشات الصغيرة عند فتح القائمة */}
       {isSidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-20 lg:hidden transition-opacity" onClick={() => setIsSidebarOpen(false)} />
+        <div 
+          className="fixed inset-0 bg-black/50 z-20 lg:hidden transition-opacity" 
+          onClick={() => setIsSidebarOpen(false)} 
+        />
       )}
 
       {/* الـ Sidebar الجانبي */}
@@ -146,7 +157,7 @@ export default function StudentAttendanceReportsPage() {
       </aside>
 
       {/* المحتوى الرئيسي */}
-      <main className="flex-1 lg:mr-64 p-4 md:p-8 overflow-y-auto min-h-screen w-full">
+      <main className="flex-1 lg:mr-64 p-4 md:p-8 overflow-y-auto min-h-screen w-full min-w-0">
         {/* Header */}
         <header className="bg-white rounded-2xl p-4 mb-6 border border-gray-100 shadow-sm flex items-center justify-between gap-4">
           <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-gray-700">☰</button>
@@ -196,7 +207,7 @@ export default function StudentAttendanceReportsPage() {
               <div className="text-4xl">🎉</div>
               <h3 className="font-bold text-gray-700 text-sm">لا توجد سجلات غياب مسجلة</h3>
               <p className="text-xs text-gray-400 max-w-sm mx-auto">
-                الحمد لله، لا يوجد أي تسديدات غياب أو ملاحظات عدم حضور صادرة من الأستاذ للأبناء المحددين.
+                الحمد لله، لا يوجد أي تسجيلات غياب أو ملاحظات عدم حضور صادرة من الأستاذ للأبناء المحددين.
               </p>
             </div>
           ) : (
@@ -205,9 +216,9 @@ export default function StudentAttendanceReportsPage() {
                 <thead>
                   <tr className="bg-gray-50 text-gray-400 border-b border-gray-100">
                     <th className="p-4 font-bold">اسم الابن</th>
-                    <th className="p-4 font-bold">تاريخ الحصه / الغياب</th>
+                    <th className="p-4 font-bold">تاريخ الحصة / الغياب</th>
                     <th className="p-4 font-bold">الحالة</th>
-                    <th className="p-4 font-bold">ملاحظة ورأي الأستاذ (`notes`)</th>
+                    <th className="p-4 font-bold">ملاحظة ورأي الأستاذ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 text-gray-700 font-medium">

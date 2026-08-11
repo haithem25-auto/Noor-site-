@@ -44,23 +44,25 @@ export default function ParentDashboard() {
         const parentId = user.id;
         setCurrentParentId(parentId);
 
-        // 2️⃣ جلب بيانات البروفايل الخاص بولي الأمر
+        // 2️⃣ جلب بيانات البروفايل الخاص بولي الأمر لمعرفة mosque_id
         const { data: profileData } = await supabase
           .from("profiles")
           .select("*")
           .eq("id", parentId)
           .single();
 
+        let parentMosqueId: string | null = null;
+
         if (profileData) {
           setParentName(profileData.full_name || user.user_metadata?.full_name || "");
+          parentMosqueId = profileData.mosque_id || null;
 
           // 3️⃣ جلب اسم المسجد المباشر من جدول mosques وفق البنية
-          const mosqueId = profileData.mosque_id;
-          if (mosqueId) {
+          if (parentMosqueId) {
             const { data: mosqueData } = await supabase
               .from("mosques")
               .select("name")
-              .eq("id", mosqueId)
+              .eq("id", parentMosqueId)
               .single();
 
             if (mosqueData?.name) {
@@ -71,10 +73,16 @@ export default function ParentDashboard() {
           }
         }
 
-        // 4️⃣ جلب الحلقات المتوفرة
+        if (!parentMosqueId) {
+          setLoading(false);
+          return;
+        }
+
+        // 4️⃣ جلب الحلقات المتوفرة المعزولة بالمسجد
         const { data: halaqatData, error: halaqatError } = await supabase
           .from("halaqat")
-          .select("*");
+          .select("*")
+          .eq("mosque_id", parentMosqueId);
 
         if (halaqatError) {
           console.error("Error fetching halaqat:", halaqatError);
@@ -82,13 +90,18 @@ export default function ParentDashboard() {
           setHalaqat(halaqatData);
         }
 
-        // 5️⃣ جلب الأبناء المقبولين والمرتبطين بولي الأمر
+        // 5️⃣ جلب الأبناء المقبولين والمرتبطين بولي الأمر ونفس المسجد
         const { data: studentsData, error: studentsError } = await supabase
           .from("students")
           .select("*")
-          .eq("parent_id", parentId);
+          .eq("parent_id", parentId)
+          .eq("mosque_id", parentMosqueId);
 
-        if (studentsError) return;
+        if (studentsError) {
+          setLoading(false);
+          return;
+        }
+
         if (!studentsData || studentsData.length === 0) {
           setChildren([]);
           setLoading(false);
@@ -107,11 +120,12 @@ export default function ParentDashboard() {
         setChildren(enrichedStudents);
         const studentIds = enrichedStudents.map((s) => s.id);
 
-        // 6️⃣ جلب سجل الحضور والغياب
+        // 6️⃣ جلب سجل الحضور والغياب المفلتر بـ mosque_id
         const { data: attendanceData } = await supabase
           .from("attendance")
           .select("student_id, status, attendance_date")
-          .in("student_id", studentIds);
+          .in("student_id", studentIds)
+          .eq("mosque_id", parentMosqueId);
 
         const map: Record<string, { status: string; rate: number; stats: any }> = {};
 
@@ -136,7 +150,7 @@ export default function ParentDashboard() {
 
         setAttendanceMap(map);
 
-        // 7️⃣ جلب الإشعارات
+        // 7️⃣ جلب الإشعارات الخاصة بالولي
         const { data: notificationsData } = await supabase
           .from("notifications")
           .select("*")
@@ -151,7 +165,7 @@ export default function ParentDashboard() {
           setNotifications(filteredNotifs.slice(0, 3));
         }
       } catch (err) {
-        console.error(err);
+        console.error("Dashboard Loading Error:", err);
       } finally {
         setLoading(false);
       }
@@ -201,7 +215,7 @@ export default function ParentDashboard() {
         <div className="fixed inset-0 bg-black/50 z-20 lg:hidden transition-opacity" onClick={() => setIsSidebarOpen(false)} />
       )}
 
-      {/* الـ Sidebar الجانبي المُعَدَّل */}
+      {/* الـ Sidebar الجانبي */}
       <aside className={`w-64 bg-[#064e3b] text-white p-6 flex flex-col justify-between fixed h-screen right-0 top-0 z-30 shadow-xl transition-transform duration-300 lg:translate-x-0 ${isSidebarOpen ? "translate-x-0" : "translate-x-full"}`}>
         <div className="space-y-8">
           <div className="flex items-center justify-between border-b border-white/10 pb-6">
@@ -260,7 +274,7 @@ export default function ParentDashboard() {
       </aside>
 
       {/* محتوى اللوحة الرئيسي */}
-      <main className="flex-1 lg:mr-64 p-4 md:p-8 overflow-y-auto min-h-screen w-full">
+      <main className="flex-1 lg:mr-64 p-4 md:p-8 overflow-y-auto min-h-screen w-full min-w-0">
         <header className="bg-white rounded-2xl p-4 mb-6 border border-gray-100 shadow-sm flex items-center justify-between gap-4">
           <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-gray-700">☰</button>
           <div className="flex items-center gap-3 flex-1 lg:flex-none">
@@ -291,7 +305,7 @@ export default function ParentDashboard() {
               <h1 className="text-xl md:text-2xl font-black text-gray-800 flex items-center gap-2">
                 مرحباً {parentName ? `أ. ${parentName.split(" ")[0]}` : "بكم"} 👋
               </h1>
-              <p className="text-gray-500 text-xs mt-1">تفاصيل أبنائك محدثة ومربوطة بجدول الحلقات وجدول طلبات المعلم حياً.</p>
+              <p className="text-gray-500 text-xs mt-1">تفاصيل أبنائك محدثة ومربوطة بجدول الحلقات وتوقيت الدراسة حياً.</p>
             </div>
           </div>
 
@@ -332,7 +346,9 @@ export default function ParentDashboard() {
             {loading ? (
               <p className="text-gray-400 text-xs animate-pulse">جاري المزامنة مع قاعدة البيانات...</p>
             ) : filteredChildren.length === 0 ? (
-              <div className="bg-white p-6 rounded-2xl border text-center text-gray-400 text-xs">لا توجد نتائج تطابق بحثك حالياً.</div>
+              <div className="bg-white p-6 rounded-2xl border border-gray-100 text-center text-gray-400 text-xs">
+                لا توجد نتائج تطابق بحثك حالياً.
+              </div>
             ) : (
               filteredChildren.map((child) => {
                 const childStatus = attendanceMap[child.id];
@@ -367,22 +383,24 @@ export default function ParentDashboard() {
           </div>
 
           <div className="lg:col-span-2 space-y-6">
-            {/* 📅 الجدول الأسبوعي المستنبط حياً ومباشرة من جدول halaqat */}
+            {/* 📅 الجدول الأسبوعي */}
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-              <h4 className="font-black text-gray-800 text-sm mb-4">📅 الجدول الأسبوعي وتوقيت الدراسة الحي القادم من جدول (`halaqat`)</h4>
+              <h4 className="font-black text-gray-800 text-sm mb-4">📅 الجدول الأسبوعي وتوقيت الدراسة الحي الخاص بالمسجد</h4>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-right border-collapse min-w-[400px]">
                   <thead>
                     <tr className="bg-gray-50 text-gray-400 border-b border-gray-100">
-                      <th className="p-3 font-bold">اسم الحلقة الدراسية (`name`)</th>
-                      <th className="p-3 font-bold">المستوى المستهدف (`level`)</th>
-                      <th className="p-3 font-bold">توقيت الدراسة المستلم من السيرفر (`schedule`)</th>
+                      <th className="p-3 font-bold">اسم الحلقة الدراسية</th>
+                      <th className="p-3 font-bold">المستوى المستهدف</th>
+                      <th className="p-3 font-bold">توقيت الدراسة</th>
                     </tr>
                   </thead>
                   <tbody className="text-gray-600 font-medium">
                     {halaqat.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="p-3 text-center text-gray-400 animate-pulse">جاري فحص وتحديث التوقيت من قاعدة البيانات حياً...</td>
+                        <td colSpan={3} className="p-4 text-center text-gray-400">
+                          {loading ? "جاري جلب جدول الحلقات..." : "لا توجد حلقات دراسية مسجلة في هذا المسجد حالياً"}
+                        </td>
                       </tr>
                     ) : (
                       halaqat.map((halaqa) => (

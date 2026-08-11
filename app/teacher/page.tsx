@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useUserRole } from "@/hooks/useUserRole";
 import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
-import Sidebar from "@/app/components/dashboard/Sidebar"; 
+import Sidebar from "@/app/components/dashboard/Sidebar";
 import {
   ResponsiveContainer,
   LineChart,
@@ -39,12 +39,16 @@ export default function TeacherDashboard() {
   const { role, loading: roleLoading } = useUserRole();
 
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [mounted, setMounted] = useState<boolean>(false);
 
   const [halaqat, setHalaqat] = useState<Halaqa[]>([]);
-  const [studentsCount, setStudentsCount] = useState<number>(0);
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceStats, setAttendanceStats] = useState({ present: 0, absent: 0 });
   const [loadingData, setLoadingData] = useState<boolean>(true);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!roleLoading && role !== "teacher") {
@@ -58,28 +62,29 @@ export default function TeacherDashboard() {
     async function loadDashboardData() {
       setLoadingData(true);
       try {
+        // جلب بيانات المعلم الحالي
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        // 1. جلب الحلقات الخاصة بالمعلم فقط
         const { data: halaqatData, error: halaqatError } = await supabase
           .from("halaqat")
-          .select("*");
+          .select("*")
+          .eq("teacher_id", user.id);
 
         if (halaqatError) throw halaqatError;
-        if (halaqatData) setHalaqat(halaqatData);
+        setHalaqat(halaqatData || []);
 
-        const { count, error: countError } = await supabase
-          .from("students")
-          .select("*", { count: "exact", head: true });
-
-        if (!countError && count !== null) {
-          setStudentsCount(count);
-        }
-
+        // 2. جلب قائمة الطلاب التابعين للمعلم
         const { data: studentsData, error: studentsError } = await supabase
           .from("students")
-          .select("*");
+          .select("*")
+          .eq("teacher_id", user.id);
 
         if (studentsError) throw studentsError;
-        if (studentsData) setStudents(studentsData);
+        setStudents(studentsData || []);
 
+        // 3. جلب احصائيات الحضور
         const { data: attendanceData, error: attendanceError } = await supabase
           .from("attendance")
           .select("status");
@@ -93,15 +98,13 @@ export default function TeacherDashboard() {
           });
           setAttendanceStats({ present, absent });
         }
-      } catch (error: any) {
-        console.error("خطأ أثناء جلب بيانات لوحة التحكم:", error.message);
-      } finally { // تم تصحيح الخطأ الإملائي هنا من finaly إلى finally
-        boxLayoutAdjustment();
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          console.error("خطأ أثناء جلب بيانات لوحة التحكم:", error.message);
+        }
+      } finally {
+        setLoadingData(false);
       }
-    }
-
-    function boxLayoutAdjustment() {
-      setLoadingData(false);
     }
 
     loadDashboardData();
@@ -121,7 +124,7 @@ export default function TeacherDashboard() {
     });
   }, [halaqat, students]);
 
-  if (roleLoading || loadingData) {
+  if (!mounted || roleLoading || loadingData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FCFBF7]">
         <div className="text-center space-y-4">
@@ -134,13 +137,19 @@ export default function TeacherDashboard() {
     );
   }
 
+  const totalAttendance = attendanceStats.present + attendanceStats.absent || 1;
+  const presencePercentage = attendanceStats.present > 0
+    ? Math.floor((attendanceStats.present / totalAttendance) * 100)
+    : 0;
+  const absencePercentage = attendanceStats.absent > 0
+    ? Math.floor((attendanceStats.absent / totalAttendance) * 100)
+    : 0;
+
   return (
     <div className="min-h-screen bg-[#FCFBF7] flex" dir="rtl">
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
-      <main
-        className="flex-1 min-h-screen text-right font-sans antialiased relative overflow-hidden selection:bg-[#0F5132] selection:text-white"
-      >
+      <main className="flex-1 min-h-screen text-right font-sans antialiased relative overflow-hidden selection:bg-[#0F5132] selection:text-white">
         <div className="absolute top-0 left-0 w-64 h-64 bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:16px_16px] opacity-10 pointer-events-none"></div>
         <div className="absolute bottom-0 right-0 w-64 h-64 bg-[radial-gradient(#0F5132_1px,transparent_1px)] [background-size:16px_16px] opacity-10 pointer-events-none"></div>
 
@@ -174,11 +183,12 @@ export default function TeacherDashboard() {
             </div>
           </header>
 
+          {/* البطاقات الإحصائية */}
           <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
             {[
               {
                 title: "إجمالي طلبة المعلم",
-                value: `${studentsCount} طالب`,
+                value: `${students.length} طالب`,
                 color: "text-[#0F5132]",
                 icon: "👥",
                 desc: "المسجلين في الفروع الحالية",
@@ -192,30 +202,14 @@ export default function TeacherDashboard() {
               },
               {
                 title: "نسبة الحضور التراكمية",
-                value:
-                  attendanceStats.present > 0
-                    ? `%${Math.floor(
-                        (attendanceStats.present /
-                          (attendanceStats.present + attendanceStats.absent ||
-                            1)) *
-                          100
-                      )}`
-                    : "%0",
+                value: `%${presencePercentage}`,
                 color: "text-emerald-700",
                 icon: "🟢",
                 desc: "حضور الطلاب منذ انطلاق الفصل",
               },
               {
                 title: "نسبة الغياب العامة",
-                value:
-                  attendanceStats.absent > 0
-                    ? `%${Math.floor(
-                        (attendanceStats.absent /
-                          (attendanceStats.present + attendanceStats.absent ||
-                            1)) *
-                          100
-                      )}`
-                    : "%0",
+                value: `%${absencePercentage}`,
                 color: "text-amber-800",
                 icon: "🔴",
                 desc: "معدل الغيابات غير المبررة",
@@ -244,6 +238,7 @@ export default function TeacherDashboard() {
             ))}
           </section>
 
+          {/* الرسم البياني */}
           <section className="bg-white rounded-2xl p-4 md:p-6 border border-gray-100 shadow-sm mb-8">
             <div className="border-r-4 border-[#0F5132] pr-3 mb-6">
               <h2 className="text-lg md:text-xl font-bold text-[#0F5132] font-serif">
@@ -307,6 +302,7 @@ export default function TeacherDashboard() {
             </div>
           </section>
 
+          {/* جدول الحلقات */}
           <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="p-4 md:p-6 border-b border-gray-100 flex items-center justify-between bg-gradient-to-l from-[#0F5132]/5 to-transparent gap-4">
               <div className="border-r-4 border-[#0F5132] pr-3">
