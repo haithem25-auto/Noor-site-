@@ -205,7 +205,7 @@ export default function TeacherSettingsPage() {
           teacher_id: user?.id,
           halaqa_id: selectedAbsenceHalaqaId,
           reason: absenceReason.trim(),
-          status: "notified"
+          status: "pending"
         });
 
       if (error) throw error;
