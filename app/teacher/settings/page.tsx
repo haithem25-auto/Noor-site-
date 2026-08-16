@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Sidebar from "@/app/components/dashboard/Sidebar";
 
-// إنشاء نسخة موحدة (Singleton) لمنع تحذير Multiple GoTrueClient نهائياً
+// إنشاء العميل مع تفادي إعادة الإنشاء في بيئة التطوير
 const getSupabaseClient = () => {
   const globalVar = globalThis as any;
   if (!globalVar.supabaseInstance) {
@@ -21,62 +21,66 @@ const supabase = getSupabaseClient();
 interface Halaqa {
   id: string;
   name: string;
-  schedule: string; // تم التعديل إلى schedule بناءً على بنية الجدول الحقيقية
+  schedule: string;
   mosque_id: string;
   teacher_id: string;
 }
 
 interface Student {
   id: string;
-  full_name: string; // تم التصحيح ليتطابق مع عمود full_name في قاعدة البيانات
+  full_name: string;
   halaqa_id: string;
 }
 
 export default function TeacherSettingsPage() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-  
+
+  // البيانات
   const [myHalaqat, setMyHalaqat] = useState<Halaqa[]>([]);
   const [allMosqueHalaqat, setAllMosqueHalaqat] = useState<Halaqa[]>([]);
   const [transferStudents, setTransferStudents] = useState<Student[]>([]);
 
+  // حالات التحميل للأزرار
   const [btnLoading, setBtnLoading] = useState<string | null>(null);
 
+  // 1. تغيير توقيت الحلقة
   const [selectedHalaqaTimeId, setSelectedHalaqaTimeId] = useState<string>("");
   const [newTiming, setNewTiming] = useState<string>("");
 
+  // 2. نقل طالب
   const [sourceHalaqaId, setSourceHalaqaId] = useState<string>("");
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [targetHalaqaId, setTargetHalaqaId] = useState<string>("");
 
+  // 3. إشعار الغياب
   const [selectedAbsenceHalaqaId, setSelectedAbsenceHalaqaId] = useState<string>("");
   const [absenceReason, setAbsenceReason] = useState<string>("");
 
+  // جلب البيانات الأولية عند تحميل الصفحة
   useEffect(() => {
     async function fetchInitialData() {
       try {
         setLoading(true);
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) throw new Error("لم يتم العثور على جلسة مستخدم نشطة");
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
-        // جلب البيانات واستدعاء عمود schedule الفعلي لمنع خطأ 400
-        const { data: halaqatData, error: halaqatError } = await supabase
+        // جلب حلقات هذا المعلم
+        const { data: halaqatData } = await supabase
           .from("halaqat")
           .select("id, name, schedule, mosque_id, teacher_id")
           .eq("teacher_id", user.id);
 
-        if (halaqatError) throw halaqatError;
         setMyHalaqat(halaqatData || []);
 
+        // جلب جميع حلقات المسجد التابع له المعلم لنقل الطلاب بينها
         if (halaqatData && halaqatData.length > 0) {
           const mosqueId = halaqatData[0].mosque_id;
-          
-          const { data: mosqueHalaqat, error: mosqueHalaqatError } = await supabase
+          const { data: mosqueHalaqat } = await supabase
             .from("halaqat")
             .select("id, name, schedule, mosque_id, teacher_id")
             .eq("mosque_id", mosqueId);
 
-          if (mosqueHalaqatError) throw mosqueHalaqatError;
           setAllMosqueHalaqat(mosqueHalaqat || []);
         }
       } catch (error) {
@@ -88,6 +92,7 @@ export default function TeacherSettingsPage() {
     fetchInitialData();
   }, []);
 
+  // جلب طلاب الحلقة المصدر المختارة في قسم نقل الطلاب
   useEffect(() => {
     async function fetchStudentsForHalaqa() {
       if (!sourceHalaqaId) {
@@ -95,13 +100,11 @@ export default function TeacherSettingsPage() {
         return;
       }
       try {
-        // تم تصحيح student_name إلى full_name لمنع خطأ 400
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("students")
           .select("id, full_name, halaqa_id")
           .eq("halaqa_id", sourceHalaqaId);
 
-        if (error) throw error;
         setTransferStudents(data || []);
       } catch (error) {
         console.error("Error fetching students:", error);
@@ -110,22 +113,25 @@ export default function TeacherSettingsPage() {
     fetchStudentsForHalaqa();
   }, [sourceHalaqaId]);
 
-  const handleUpdateTiming = async (e: React.FormEvent) => {
+  // 1. معالجة تحديث توقيت الحلقة
+  const handleUpdateTiming = async (e: FormEvent) => {
     e.preventDefault();
-    if (!selectedHalaqaTimeId || !newTiming) return;
+    if (!selectedHalaqaTimeId || !newTiming.trim()) return;
 
     try {
       setBtnLoading("timing");
-      // تحديث عمود schedule بالقيمة الجديدة المكتوبة
       const { error } = await supabase
         .from("halaqat")
-        .update({ schedule: newTiming })
+        .update({ schedule: newTiming.trim() })
         .eq("id", selectedHalaqaTimeId);
 
       if (error) throw error;
       alert("تم تحديث توقيت الحلقة بنجاح.");
       
-      setMyHalaqat(prev => prev.map(h => h.id === selectedHalaqaTimeId ? { ...h, schedule: newTiming } : h));
+      // تحديث الحالة المحلية
+      setMyHalaqat((prev) =>
+        prev.map((h) => (h.id === selectedHalaqaTimeId ? { ...h, schedule: newTiming.trim() } : h))
+      );
       setNewTiming("");
     } catch (error) {
       console.error("Error updating timing:", error);
@@ -135,17 +141,20 @@ export default function TeacherSettingsPage() {
     }
   };
 
-  const handleTransferStudent = async (e: React.FormEvent) => {
+  // 2. معالجة نقل الطالب
+  const handleTransferStudent = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedStudentId || !targetHalaqaId) return;
 
     try {
       setBtnLoading("transfer");
-      
+
+      // التحقق مما إذا كانت الحلقة المستهدفة خاصة بنفس المعلم أم أستاذ آخر
       const targetHalaqa = allMosqueHalaqat.find((h) => h.id === targetHalaqaId);
       const { data: { user } } = await supabase.auth.getUser();
 
       if (targetHalaqa && targetHalaqa.teacher_id === user?.id) {
+        // إذا كانت الحلقة لنفس المعلم: يتم النقل والموافقة المباشرة
         const { error } = await supabase
           .from("students")
           .update({ halaqa_id: targetHalaqaId })
@@ -154,14 +163,15 @@ export default function TeacherSettingsPage() {
         if (error) throw error;
         alert("تم نقل الطالب وقبوله مباشرة داخل حلقاتك بنجاح.");
       } else {
+        // إذا كانت الحلقة لأستاذ آخر: يتم إرسال طلب نقل (Join Request) برسم المعالجة
         const currentStudent = transferStudents.find((s) => s.id === selectedStudentId);
-        
+
         const { error } = await supabase
           .from("join_requests")
           .insert({
             mosque_id: targetHalaqa?.mosque_id,
             halaqa_id: targetHalaqaId,
-            student_name: currentStudent?.full_name, // استخدام full_name هنا أيضاً
+            student_name: currentStudent?.full_name,
             status: "pending"
           });
 
@@ -169,7 +179,7 @@ export default function TeacherSettingsPage() {
         alert("تم إرسال طلب نقل الطالب وهو الآن في انتظار موافقة أستاذ الحلقة المنقول إليها.");
       }
 
-      setSourceHalaqaId("");
+      // تفريغ المدخلات بعد النجاح
       setSelectedStudentId("");
       setTargetHalaqaId("");
     } catch (error) {
@@ -180,9 +190,10 @@ export default function TeacherSettingsPage() {
     }
   };
 
-  const handleNotifyAbsence = async (e: React.FormEvent) => {
+  // 3. معالجة التنبيه بالغياب الاستباقي
+  const handleNotifyAbsence = async (e: FormEvent) => {
     e.preventDefault();
-    if (!selectedAbsenceHalaqaId || !absenceReason) return;
+    if (!selectedAbsenceHalaqaId || !absenceReason.trim()) return;
 
     try {
       setBtnLoading("absence");
@@ -193,7 +204,7 @@ export default function TeacherSettingsPage() {
         .insert({
           teacher_id: user?.id,
           halaqa_id: selectedAbsenceHalaqaId,
-          reason: absenceReason,
+          reason: absenceReason.trim(),
           status: "notified"
         });
 
@@ -212,10 +223,12 @@ export default function TeacherSettingsPage() {
   return (
     <div className="min-h-screen bg-[#F4F6F8] text-slate-800 flex relative overflow-x-hidden" dir="rtl">
       
+      {/* القائمة الجانبية */}
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       <div className="flex-1 min-w-0 flex flex-col h-screen overflow-y-auto">
         
+        {/* الهيدر العلوي */}
         <header className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shrink-0 sticky top-0 z-30">
           <div className="text-sm font-bold text-[#007A53]">
             إدارة وتأسيس الحلقات القرآنية والتعليمية
@@ -231,9 +244,11 @@ export default function TeacherSettingsPage() {
           </button>
         </header>
 
+        {/* محتوى الصفحة الرئيسي */}
         <main className="p-4 md:p-8 flex-1 bg-[#FCFBF7]">
           <div className="max-w-4xl mx-auto space-y-8">
             
+            {/* بطاقة الترحيب بأسلوب مخصص */}
             <div className="bg-[#007A53] p-8 rounded-xl text-white shadow-lg relative border-b-8 border-[#E2A014] overflow-hidden">
               <h1 className="text-xl md:text-3xl font-bold tracking-wide">إعدادات وعمليات المعلم</h1>
               <p className="text-emerald-100 text-xs md:text-sm mt-2 font-light">
@@ -281,7 +296,7 @@ export default function TeacherSettingsPage() {
                     </div>
                     <button
                       type="submit"
-                      disabled={btnLoading !== null}
+                      disabled={btnLoading !== null || !selectedHalaqaTimeId || !newTiming.trim()}
                       className="bg-[#007A53] hover:bg-[#005c3e] text-white text-xs font-bold p-3 rounded-lg transition shadow-sm disabled:opacity-50"
                     >
                       {btnLoading === "timing" ? "جاري التحديث..." : "حفظ التوقيت الجديد"}
@@ -300,7 +315,10 @@ export default function TeacherSettingsPage() {
                         <label className="block text-xs font-semibold text-slate-500 mb-2">الخانة الأولى: الحلقة الحالية</label>
                         <select
                           value={sourceHalaqaId}
-                          onChange={(e) => setSourceHalaqaId(e.target.value)}
+                          onChange={(e) => {
+                            setSourceHalaqaId(e.target.value);
+                            setSelectedStudentId("");
+                          }}
                           className="w-full text-sm border border-slate-200 rounded-lg p-2.5 bg-slate-50 focus:outline-none focus:border-[#007A53]"
                           required
                         >
@@ -328,7 +346,7 @@ export default function TeacherSettingsPage() {
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-2">الخانة الثالثة: الحلقة المستهدفة للنقل</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-2">الخانة الثالثة: الحلقة المستهدفة بالنقل</label>
                         <select
                           value={targetHalaqaId}
                           onChange={(e) => setTargetHalaqaId(e.target.value)}
@@ -336,11 +354,13 @@ export default function TeacherSettingsPage() {
                           required
                         >
                           <option value="">-- حدد الحلقة المستهدفة --</option>
-                          {allMosqueHalaqat.map((h) => (
-                            <option key={h.id} value={h.id}>
-                              {h.name} {myHalaqat.some(mh => mh.id === h.id) ? "(حلقة تابعة لك 🔒)" : "(حلقة في نفس المسجد 🏛️)"}
-                            </option>
-                          ))}
+                          {allMosqueHalaqat
+                            .filter((h) => h.id !== sourceHalaqaId)
+                            .map((h) => (
+                              <option key={h.id} value={h.id}>
+                                {h.name} {myHalaqat.some((mh) => mh.id === h.id) ? "(حلقة تابعة لك 🔒)" : "(حلقة أستاذ آخر 👥)"}
+                              </option>
+                            ))}
                         </select>
                       </div>
                     </div>
@@ -357,7 +377,7 @@ export default function TeacherSettingsPage() {
                 </section>
 
                 {/* 3. لوحة إشعار مسبق بالغياب */}
-                <section className="bg-[#FFFFFF] rounded-xl shadow-sm border border-slate-200 p-6">
+                <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
                   <h2 className="text-base font-bold text-[#0B1528] mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
                     <span>📢</span> إرسال إشعار مسبق بالغياب لأولياء الأمور
                   </h2>
@@ -392,7 +412,7 @@ export default function TeacherSettingsPage() {
                     <div className="flex justify-end pt-2">
                       <button
                         type="submit"
-                        disabled={btnLoading !== null || !selectedAbsenceHalaqaId || !absenceReason}
+                        disabled={btnLoading !== null || !selectedAbsenceHalaqaId || !absenceReason.trim()}
                         className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-6 py-3 rounded-lg transition shadow-sm disabled:opacity-50"
                       >
                         {btnLoading === "absence" ? "جاري تسجيل التنبيه..." : "🚀 بث وإرسال التنبيه الاستباقي للأولياء"}
