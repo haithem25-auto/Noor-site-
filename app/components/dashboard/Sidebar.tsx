@@ -29,6 +29,7 @@ export default function Sidebar({
     { name: "الطلبة", href: "/dashboard/students" },
     { name: "الحلقات", href: "/dashboard/halaqat" },
     { name: "إشعارات المسجد", href: "/dashboard/notifications" },
+    { name: "صفحة الصيانة", href: "/dashboard/maintenance" },
     { name: "الإعدادات", href: "/dashboard/settings" },
   ];
 
