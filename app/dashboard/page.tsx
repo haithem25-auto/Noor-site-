@@ -33,6 +33,7 @@ interface PendingProfileItem {
   id: string;
   full_name: string;
   email: string;
+  phone?: string;
   role: "teacher" | "parent" | "community_member";
   created_at: string;
 }
@@ -41,6 +42,8 @@ interface MasjidGoerItem {
   id: string;
   full_name: string;
   email: string;
+  phone_number?: string;
+  occupation?: string;
   created_at: string;
 }
 
@@ -73,6 +76,9 @@ export default function DashboardPage() {
   const [activeSubTab, setActiveSubTab] = useState<"requests" | "goers">("requests");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  // حالة فلترة رواد المسجد حسب الوظيفة
+  const [selectedOccupationFilter, setSelectedOccupationFilter] = useState<string>("all");
+
   useEffect(() => {
     if (!roleLoading && role !== "imam") {
       router.push("/");
@@ -88,7 +94,7 @@ export default function DashboardPage() {
     try {
       const { data: reqData, error: reqErr } = await supabase
         .from("profiles")
-        .select("id, full_name, email, role, created_at, status")
+        .select("id, full_name, email, phone, role, created_at, status")
         .eq("status", "pending");
       
       if (!reqErr && reqData) {
@@ -98,9 +104,10 @@ export default function DashboardPage() {
         setPendingProfiles(filteredRequests as PendingProfileItem[]);
       }
 
+      // تم تصحيح phone إلى phone_number لتتوافق مع هيكل جدول masjid_goers
       const { data: goerData, error: goerErr } = await supabase
         .from("masjid_goers")
-        .select("id, full_name, email, created_at")
+        .select("id, full_name, email, phone_number, occupation, created_at")
         .eq("mosque_id", cleanId);
         
       if (!goerErr && goerData) setMasjidGoers(goerData as MasjidGoerItem[]);
@@ -339,6 +346,16 @@ export default function DashboardPage() {
     }
   };
 
+  // استخراج قائمة الوظائف الفريدة المتوفرة لدى رواد المسجد
+  const uniqueOccupations = Array.from(
+    new Set(masjidGoers.map((g) => g.occupation).filter(Boolean))
+  );
+
+  // تصفية رواد المسجد حسب الوظيفة المختارة
+  const filteredMasjidGoers = selectedOccupationFilter === "all"
+    ? masjidGoers
+    : masjidGoers.filter((g) => g.occupation === selectedOccupationFilter);
+
   if (roleLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#053F2E] text-white">
@@ -476,21 +493,46 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 w-full">
             
             <div className="xl:col-span-2 bg-white rounded-2xl md:rounded-3xl p-4 md:p-6 border border-slate-100 shadow-sm flex flex-col w-full overflow-hidden">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4 w-full overflow-x-auto whitespace-nowrap scrollbar-none">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 mb-4 gap-3">
                 <div className="flex gap-1.5 p-1 bg-slate-100 rounded-xl">
                   <button
                     onClick={() => setActiveSubTab("requests")}
-                    className={`px-2.5 py-1.5 text-[11px] md:text-xs font-bold rounded-lg transition-all ${activeSubTab === "requests" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                    className={`px-3 py-1.5 text-[11px] md:text-xs font-bold rounded-lg transition-all ${activeSubTab === "requests" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
                   >
                     ⏳ طلبات الحسابات المعلقة ({pendingProfiles.length})
                   </button>
                   <button
                     onClick={() => setActiveSubTab("goers")}
-                    className={`px-2.5 py-1.5 text-[11px] md:text-xs font-bold rounded-lg transition-all ${activeSubTab === "goers" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                    className={`px-3 py-1.5 text-[11px] md:text-xs font-bold rounded-lg transition-all ${activeSubTab === "goers" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
                   >
-                     رواد المسجد  ({masjidGoers.length})                  
-                   </button>
+                    👥 رواد المسجد ({masjidGoers.length})
+                  </button>
                 </div>
+
+                {/* زر البحث والفلترة حسب الوظائف (يظهر حصرياً عند تبويب رواد المسجد) */}
+                {activeSubTab === "goers" && uniqueOccupations.length > 0 && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold text-slate-500">🔍 تصفية بالوظيفة:</span>
+                    <select
+                      value={selectedOccupationFilter}
+                      onChange={(e) => setSelectedOccupationFilter(e.target.value)}
+                      className="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-1.5 font-semibold focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="all">جميع الوظائف ({masjidGoers.length})</option>
+                      {uniqueOccupations.map((occ, idx) => (
+                        <option key={idx} value={occ}>{occ}</option>
+                      ))}
+                    </select>
+                    {selectedOccupationFilter !== "all" && (
+                      <button
+                        onClick={() => setSelectedOccupationFilter("all")}
+                        className="text-[10px] text-red-600 bg-red-50 px-2 py-1 rounded-lg font-bold hover:bg-red-100 transition"
+                      >
+                        إلغاء التصفية ✕
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex-1 w-full">
@@ -508,7 +550,8 @@ export default function DashboardPage() {
                                 {item.role === "teacher" ? "معلّـم" : item.role === "parent" ? "ولي أمر" : "عضو مجتمع"}
                               </span>
                             </div>
-                            <p className="text-slate-500 font-mono break-all">{item.email}</p>
+                            <p className="text-slate-500 font-mono break-all">✉️ {item.email}</p>
+                            <p className="text-slate-600 font-mono">📞 {item.phone || "غير متوفر"}</p>
                             <div className="flex gap-2 pt-1 border-t border-slate-200/60">
                               <button
                                 onClick={() => handleAcceptProfile(item.id)}
@@ -534,6 +577,7 @@ export default function DashboardPage() {
                           <tr className="text-slate-400 border-b border-slate-100">
                             <th className="pb-3 font-bold">الاسم الكامل</th>
                             <th className="pb-3 font-bold">البريد الإلكتروني</th>
+                            <th className="pb-3 font-bold">رقم الهاتف</th>
                             <th className="pb-3 font-bold">نوع الحساب المطلـوب</th>
                             <th className="pb-3 font-bold text-center">إجراءات الإمام</th>
                           </tr>
@@ -543,6 +587,7 @@ export default function DashboardPage() {
                             <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="py-3 font-bold text-slate-800">{item.full_name}</td>
                               <td className="py-3 text-slate-500 font-mono">{item.email}</td>
+                              <td className="py-3 text-slate-700 font-mono" dir="ltr">{item.phone || "غير متوفر"}</td>
                               <td className="py-3">
                                 <span className={`px-2 py-1 rounded-md font-bold text-[10px] ${item.role === "teacher" ? "bg-purple-50 text-purple-700" : item.role === "parent" ? "bg-blue-50 text-blue-700" : "bg-orange-50 text-orange-700"}`}>
                                   {item.role === "teacher" ? "👨‍🏫 طلب معلّـم" : item.role === "parent" ? "👨‍👩‍👦 طلب ولي أمر" : "👥 عضو مجتمع"}
@@ -571,18 +616,21 @@ export default function DashboardPage() {
                     </>
                   )
                 ) : (
-                  masjidGoers.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-10">لا يوجد رواد مشتركون في التنبيهات السريعة حتى الآن.</p>
+                  filteredMasjidGoers.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-10">لا توجد نتائج مطابقة لرواد المسجد بهذه الوظيفة.</p>
                   ) : (
                     <>
                       <div className="block md:hidden space-y-3">
-                        {masjidGoers.map((item) => (
+                        {filteredMasjidGoers.map((item) => (
                           <div key={item.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1 text-xs">
                             <div className="flex justify-between items-center">
                               <span className="font-bold text-slate-800">{item.full_name}</span>
-                              <span className="text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded text-[9px]">نشط فوري</span>
+                              <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded text-[9px]">
+                                {item.occupation || "بدون وظيفة محددة"}
+                              </span>
                             </div>
-                            <p className="text-slate-500 font-mono break-all">{item.email}</p>
+                            <p className="text-slate-500 font-mono break-all">✉️ {item.email}</p>
+                            <p className="text-slate-600 font-mono">📞 {item.phone_number || "غير متوفر"}</p>
                           </div>
                         ))}
                       </div>
@@ -591,15 +639,19 @@ export default function DashboardPage() {
                         <thead>
                           <tr className="text-slate-400 border-b border-slate-100">
                             <th className="pb-3 font-bold">الاسم الكريم</th>
-                            <th className="pb-3 font-bold">البريد الإلكتروني للتوصل</th>
-                            <th className="pb-3 font-bold">حالة الاشتراك البريدي</th>
+                            <th className="pb-3 font-bold">البريد الإلكتروني</th>
+                            <th className="pb-3 font-bold">رقم الهاتف</th>
+                            <th className="pb-3 font-bold">الوظيفة / الحرفة</th>
+                            <th className="pb-3 font-bold">حالة الاشتراك</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {masjidGoers.map((item) => (
-                            <tr key={item.id}>
+                          {filteredMasjidGoers.map((item) => (
+                            <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="py-3 font-bold text-slate-800">{item.full_name}</td>
                               <td className="py-3 text-slate-500 font-mono">{item.email}</td>
+                              <td className="py-3 text-slate-700 font-mono" dir="ltr">{item.phone_number || "غير متوفر"}</td>
+                              <td className="py-3 font-semibold text-emerald-800">{item.occupation || "غير مسجلة"}</td>
                               <td className="py-3">
                                 <span className="text-emerald-600 font-bold bg-emerald-50 px-2 py-1 rounded-md text-[10px]">● نشط فوري</span>
                               </td>

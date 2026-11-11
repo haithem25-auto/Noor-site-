@@ -27,16 +27,21 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
   // 1. خاص باستمارة إنشاء حساب ولي الأمر
   const [parentName, setParentName] = useState("");
   const [parentEmail, setParentEmail] = useState("");
+  const [parentPhone, setParentPhone] = useState("");
   const [parentPassword, setParentPassword] = useState("");
 
   // 2. خاص باستمارة إنشاء حساب المعلم
   const [teacherName, setTeacherName] = useState("");
   const [teacherEmail, setTeacherEmail] = useState("");
+  const [teacherPhone, setTeacherPhone] = useState("");
   const [teacherPassword, setTeacherPassword] = useState("");
 
   // 3. خاص باستمارة رائد المسجد
   const [goerName, setGoerName] = useState("");
   const [goerEmail, setGoerEmail] = useState("");
+  const [goerPhone, setGoerPhone] = useState("");
+  const [goerOccupationSelect, setGoerOccupationSelect] = useState("");
+  const [goerCustomOccupation, setGoerCustomOccupation] = useState("");
 
   useEffect(() => {
     async function fetchMosqueData() {
@@ -46,7 +51,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
           .from("mosques")
           .select("id, name")
           .eq("slug", slug)
-          .maybeSingle(); // استخدام maybeSingle لمنع انهيار الصفحة إذا لم يجد السجل
+          .maybeSingle();
 
         if (mosqueErr || !mosqueData) {
           setMosque(null);
@@ -62,19 +67,20 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
     if (slug) fetchMosqueData();
   }, [slug]);
 
-  // دالة مشتركة لتسجيل الحسابات
+  // دالة مشتركة لتسجيل الحسابات (ولي الأمر والمعلم) مع رقم الهاتف
   const handleAuthRegister = async (
     e: React.FormEvent, 
     fullName: string, 
     email: string, 
+    phone: string,
     password: string, 
     targetRole: "parent" | "teacher"
   ) => {
     e.preventDefault();
     setMessage({ text: "", type: "" });
 
-    if (!fullName.trim() || !email.trim() || !password) {
-      setMessage({ text: "يرجى ملء جميع الحقول المطلوبة.", type: "error" });
+    if (!fullName.trim() || !email.trim() || !phone.trim() || !password) {
+      setMessage({ text: "يرجى ملء جميع الحقول المطلوبة ورقم الهاتف.", type: "error" });
       return;
     }
 
@@ -88,6 +94,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
           data: {
             full_name: fullName.trim(),
             role: targetRole,
+            phone: phone.trim(),
           }
         }
       });
@@ -101,6 +108,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
           id: authData.user.id,
           full_name: fullName.trim(),
           email: email.trim(),
+          phone: phone.trim(),
           role: targetRole,
           status: "pending", 
           mosque_id: mosque.id, 
@@ -115,8 +123,8 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
         type: "success" 
       });
 
-      if (targetRole === "parent") { setParentName(""); setParentEmail(""); setParentPassword(""); }
-      if (targetRole === "teacher") { setTeacherName(""); setTeacherEmail(""); setTeacherPassword(""); }
+      if (targetRole === "parent") { setParentName(""); setParentEmail(""); setParentPhone(""); setParentPassword(""); }
+      if (targetRole === "teacher") { setTeacherName(""); setTeacherEmail(""); setTeacherPhone(""); setTeacherPassword(""); }
 
     } catch (err: any) {
       console.error("Registration Error:", err);
@@ -126,23 +134,30 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
     }
   };
 
-  // دالة الاشتراك السريع لرواد المسجد
- const handleGoerSubmit = async (e: React.FormEvent) => {
+  // دالة الاشتراك لرواد المسجد (مع رقم الهاتف والوظيفة الاختيارية)
+  const handleGoerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage({ text: "", type: "" });
 
-    if (!goerName.trim() || !goerEmail.trim()) {
-      setMessage({ text: "يرجى ملء جميع الحقول المطلوبة للاشتراك.", type: "error" });
+    if (!goerName.trim() || !goerEmail.trim() || !goerPhone.trim()) {
+      setMessage({ text: "يرجى ملء الاسم، البريد الإلكتروني، ورقم الهاتف للاشتراك.", type: "error" });
       return;
     }
+
+    // تحديد الوظيفة النهائية (إما المختارة من القائمة أو المكتوبة يدوياً، أو فارغة)
+    const finalOccupation = goerOccupationSelect === "أخرى" 
+      ? goerCustomOccupation.trim() 
+      : goerOccupationSelect;
 
     try {
       setSubmitting(true);
       const { error: insertErr } = await supabase
-        .from("masjid_goers") // تم التغيير إلى الجدول الجديد
+        .from("masjid_goers")
         .insert({
           full_name: goerName.trim(),
           email: goerEmail.trim(),
+          phone: goerPhone.trim(),
+          occupation: finalOccupation || null,
           mosque_id: mosque.id,
           mosque_name: mosque.name, 
         });
@@ -152,6 +167,9 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
       setMessage({ text: "🔔 تم اشتراكك بنجاح! ستصلك إشعارات التبرعات والنشاطات من الإمام مباشرة على بريدك الإلكتروني.", type: "success" });
       setGoerName("");
       setGoerEmail("");
+      setGoerPhone("");
+      setGoerOccupationSelect("");
+      setGoerCustomOccupation("");
     } catch (err: any) {
       console.error("Subscriber Error:", err);
       setMessage({ text: `فشل الاشتراك: ${err.message || "حدث خطأ غير متوقع"}`, type: "error" });
@@ -171,7 +189,6 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
     );
   }
 
-  // الحماية: عرض واجهة مخصصة في حال كان الـ slug غير موجود بقاعدة البيانات أو تم إدخال رابط خاطئ
   if (!mosque) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] p-6 text-center" dir="rtl">
@@ -195,7 +212,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
         
         <div className="text-center mb-6">
           <span className="text-2xl">🕌</span>
-          <h1 className="text-xl sm:text-2xl font-black text-gray-900 mt-2">منصة نور للمساجد و المدارس القرانية </h1>
+          <h1 className="text-xl sm:text-2xl font-black text-gray-900 mt-2">منصة نور للمساجد و المدارس القرانية</h1>
           <p className="text-sm text-gray-500 mt-1">مسجد: <span className="text-green-700 font-bold">{mosque?.name}</span></p>
         </div>
 
@@ -234,9 +251,9 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
 
         {/* 1. واجهة طلب تسجيل حساب ولي الأمر */}
         {activeTab === "parent" && (
-          <form onSubmit={(e) => handleAuthRegister(e, parentName, parentEmail, parentPassword, "parent")} className="space-y-5">
+          <form onSubmit={(e) => handleAuthRegister(e, parentName, parentEmail, parentPhone, parentPassword, "parent")} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">الاسم الكامل لولي الأمر:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">الاسم الكامل لولي الأمر:</label>
               <input
                 type="text"
                 value={parentName}
@@ -247,7 +264,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">البريد الإلكتروني الحقيقي:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">البريد الإلكتروني الحقيقي:</label>
               <input
                 type="email"
                 value={parentEmail}
@@ -258,7 +275,18 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">كلمة مرور الحساب:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">رقم الهاتف:</label>
+              <input
+                type="tel"
+                value={parentPhone}
+                onChange={(e) => setParentPhone(e.target.value)}
+                placeholder="0550000000"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-600 text-left dir-ltr text-sm text-gray-900 font-medium"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">كلمة مرور الحساب:</label>
               <input
                 type="password"
                 value={parentPassword}
@@ -271,7 +299,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-6 rounded-2xl shadow-md transition-all text-sm disabled:opacity-50"
+              className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-6 rounded-2xl shadow-md transition-all text-sm disabled:opacity-50 mt-2"
             >
               {submitting ? "جاري إرسال طلب الحساب..." : "ارسال طلب تسجيل ولي أمر"}
             </button>
@@ -280,9 +308,9 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
 
         {/* 2. واجهة طلب تسجيل حساب معلم جديد */}
         {activeTab === "teacher" && (
-          <form onSubmit={(e) => handleAuthRegister(e, teacherName, teacherEmail, teacherPassword, "teacher")} className="space-y-5">
+          <form onSubmit={(e) => handleAuthRegister(e, teacherName, teacherEmail, teacherPhone, teacherPassword, "teacher")} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">اسم الشيخ / المعلم الكامل:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">اسم الشيخ / المعلم الكامل:</label>
               <input
                 type="text"
                 value={teacherName}
@@ -293,7 +321,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">البريد الإلكتروني المهني:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">البريد الإلكتروني المهني:</label>
               <input
                 type="email"
                 value={teacherEmail}
@@ -304,7 +332,18 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">كلمة مرور الحساب:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">رقم الهاتف:</label>
+              <input
+                type="tel"
+                value={teacherPhone}
+                onChange={(e) => setTeacherPhone(e.target.value)}
+                placeholder="0550000000"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-600 text-left dir-ltr text-sm text-gray-900 font-medium"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">كلمة مرور الحساب:</label>
               <input
                 type="password"
                 value={teacherPassword}
@@ -317,18 +356,18 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-6 rounded-2xl shadow-md transition-all text-sm disabled:opacity-50"
+              className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-6 rounded-2xl shadow-md transition-all text-sm disabled:opacity-50 mt-2"
             >
               {submitting ? "جاري إرسال طلب الإعتماد..." : "ارسال طلب إعتماد كمعلم"}
             </button>
           </form>
         )}
 
-        {/* 3. واجهة رائد المسجد */}
+        {/* 3. واجهة رائد المسجد (مع رقم الهاتف والوظيفة الاختيارية والتعليق) */}
         {activeTab === "goer" && (
-          <form onSubmit={handleGoerSubmit} className="space-y-5">
+          <form onSubmit={handleGoerSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">الاسم الكامل:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">الاسم الكامل:</label>
               <input
                 type="text"
                 value={goerName}
@@ -339,7 +378,7 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2">البريد الإلكتروني للتوصل:</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">البريد الإلكتروني للتوصل:</label>
               <input
                 type="email"
                 value={goerEmail}
@@ -348,19 +387,71 @@ export default function JoinRequestPage({ params }: JoinPageProps) {
                 className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-600 text-left dir-ltr text-sm text-gray-900 font-medium"
                 required
               />
-              <p className="text-[11px] text-gray-400 mt-1">ستصلك حملات المسجد البريدية والتبرعات والنشاطات فور بثها.</p>
             </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">رقم الهاتف:</label>
+              <input
+                type="tel"
+                value={goerPhone}
+                onChange={(e) => setGoerPhone(e.target.value)}
+                placeholder="0550000000"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-600 text-left dir-ltr text-sm text-gray-900 font-medium"
+                required
+              />
+            </div>
+
+            {/* خانة الوظيفة والمهنة الاختيارية لرواد المسجد مع التعليق المطلوب */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                الوظيفة أو الحرفة <span className="text-gray-400 font-normal">(اختياري)</span>:
+              </label>
+              <select
+                value={goerOccupationSelect}
+                onChange={(e) => setGoerOccupationSelect(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-600 text-sm text-gray-900 font-medium mb-2"
+              >
+                <option value="">-- اختر الوظيفة أو المهنة --</option>
+                <option value="كهربائي">كهربائي</option>
+                <option value="سباك">سباك</option>
+                <option value="نجار">نجار</option>
+                <option value="بناء / مقاولات">بناء / مقاولات</option>
+                <option value="تقني إعلام آلي / صيانة">تقني إعلام آلي / صيانة</option>
+                <option value="طبيب / صيدلي">طبيب / صيدلي</option>
+                <option value="تاجر / مستثمر">تاجر / مستثمر</option>
+                <option value="مهندس">مهندس</option>
+                <option value="أستاذ / معلم">أستاذ / معلم</option>
+                <option value="سائق">سائق</option>
+                <option value="أخرى">وظيفة أخرى (اكتبها يدوياً)</option>
+              </select>
+
+              {/* حقل الكتابة اليدوية إذا اخترع المستخدم "أخرى" */}
+              {goerOccupationSelect === "أخرى" && (
+                <input
+                  type="text"
+                  value={goerCustomOccupation}
+                  onChange={(e) => setGoerCustomOccupation(e.target.value)}
+                  placeholder="اكتب وظيفتك هنا..."
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-600 text-sm text-gray-900 font-medium mb-2"
+                />
+              )}
+
+              {/* التعليق المطلوب حصرياً لرواد المسجد */}
+              <p className="text-[11px] text-gray-500 leading-relaxed bg-green-50/70 p-3 rounded-xl border border-green-100 mt-1.5">
+                💡 تساعد هذه المعلومة إدارة المسجد على الاستفادة من خبرات ومهارات رواد المسجد؛ فعند الحاجة إلى كهربائي أو سبّاك أو نجّار أو غيرهم، يمكن للإدارة التواصل مع أصحاب الاختصاص مباشرة دون عناء البحث عنهم.
+              </p>
+            </div>
+
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-2xl shadow-md transition-all text-sm disabled:opacity-50"
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-2xl shadow-md transition-all text-sm disabled:opacity-50 mt-2"
             >
               {submitting ? "جاري معالجة الاشتراك..." : "🔔 تفعيل الاشتراك البريدي السريع"}
             </button>
           </form>
         )}
 
-        {/* رابط التوجيه إلى صفحة تسجيل الدخول الموحدة للمسجلين مسبقاً */}
+        {/* رابط التوجيه إلى صفحة تسجيل الدخول */}
         <div className="mt-6 pt-4 border-t border-gray-100 text-center">
           <p className="text-xs text-gray-500">
             أملك حساباً بالفعل؟{" "}

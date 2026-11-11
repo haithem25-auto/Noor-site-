@@ -1,87 +1,37 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import dynamic from "next/dynamic";
-
-// حقن واستدعاء مكون الخريطة ديناميكياً مع إيقاف الـ SSR تماماً لمنع الانهيار
-const LeafletMap = dynamic(() => import("../components/LeafletMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full bg-slate-50 flex items-center justify-center text-xs text-slate-400 animate-pulse">
-      جاري تهيئة نظام الخرائط المجاني...
-    </div>
-  ),
-});
 
 export default function RegisterPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
 
-  // الحالات الجديدة للواجهة: الإمام، شيخ الزاوية، أو مدير المدرسة القرآنية
-  const [uiRole, setUiRole] = useState("imam");
+  // التسمية في الواجهة، بينما القيمة المُرسلة لقاعدة البيانات ستكون دائماً "imam"
+  const [uiRole, setUiRole] = useState("إمام مسجد");
+  
+  // حالات تفاصيل المؤسسة
   const [mosqueName, setMosqueName] = useState("");
+  const [mosqueCity, setMosqueCity] = useState(""); // الولاية
+  const [mosqueMunicipality, setMosqueMunicipality] = useState(""); // البلدية
+  const [mosqueAddress, setMosqueAddress] = useState(""); // العنوان التفصيلي
 
-  // حالات جغرافية مضافة للامتثال للتعبئة التلقائية أو اليدوية
-  const [mosqueCity, setMosqueCity] = useState("");
-  const [mosqueAddress, setMosqueAddress] = useState("");
-  const [latitude, setLatitude] = useState<number | null>(null);
-  const [longitude, setLongitude] = useState<number | null>(null);
-
-  // حالات نظام الخطوات والخرائط المجانية
+  // حالات نظام الخطوات
   const [currentStep, setCurrentStep] = useState(1);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<any[]>([]);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([
-    36.1912, 5.4124,
-  ]); // سطيف كمركز افتراضي
-  const [hasSelectedMosque, setHasSelectedMosque] = useState(false);
   const [geoError, setGeoError] = useState("");
-  const [searchLoading, setSearchLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
 
-  // دالة البحث التلقائي في خريطة OpenStreetMap المجانية (خاصة بالإمام وشيخ الزاوية فقط)
-  useEffect(() => {
-    if (
-      uiRole === "school" ||
-      searchQuery.trim().length < 4 ||
-      hasSelectedMosque
-    ) {
-      setSuggestions([]);
-      return;
-    }
-
-    const delayDebounceFn = setTimeout(async () => {
-      try {
-        setSearchLoading(true);
-        setGeoError("");
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(
-            searchQuery
-          )}&countrycodes=dz&limit=5`
-        );
-        const data = await response.json();
-        setSuggestions(data);
-      } catch (err) {
-        console.error("خطأ في جلب الاقتراحات الجغرافية:", err);
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 600);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, hasSelectedMosque, uiRole]);
-
-  // دالة تحويل الحروف العربية إلى إنجليزية (Transliteration) معالجة وشاملة
+  // دالة تحويل الحروف العربية إلى إنجليزية للـ Slug
   const arabicToLatin = (text: string): string => {
     const map: { [key: string]: string } = {
       أ: "a", إ: "a", آ: "a", ا: "a", ب: "b", ت: "t", ث: "th", ج: "j",
       ح: "h", خ: "kh", د: "d", ذ: "dh", ر: "r", ز: "z", س: "s", ش: "sh",
-      ص: "s", ض: "d", ط: "t", ظ: "z", ع: "a", غ: "gh", ف: "f", ق: "q",
+      ص: "s", ض: "d", ط: "t", ظ: "z", ع: "a", غ: "gh", f: "f", ف: "f", ق: "q",
       ك: "k", ل: "l", م: "m", ن: "n", هـ: "h", ه: "h", و: "w", ي: "y",
       ى: "a", ة: "h", ء: "a", ئ: "y", ؤ: "w", " ": "-"
     };
@@ -92,174 +42,122 @@ export default function RegisterPage() {
       .join("");
   };
 
-  // دالة توليد الـ Slug اللاتيني الصافي (مخصص للروابط والـ QR Code)
   const generateSlug = (name: string): string => {
     const latinText = arabicToLatin(name);
-
     const cleanSlug = latinText
       .toLowerCase()
       .trim()
-      .replace(/[^a-z0-9\s-]/g, "") // إزالة أي رموز غير لاتينية
-      .replace(/[\s_]+/g, "-")       // تحويل المسافات إلى شرطات
-      .replace(/-+/g, "-")          // دمج الشرطات المتعددة
-      .replace(/^-+|-+$/g, "");     // قص الشرطات من البداية والنهاية
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/[\s_]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "");
 
-    // توليد معرف عشوائي قصير يتكون من 4 أرقام وحروف لاتينية
     const randomId = Math.random().toString(36).substring(2, 6);
-
     const baseName = cleanSlug || "mosque";
     return `${baseName}-${randomId}`;
   };
 
-  // عند اختيار المؤسسة الحقيقية من القائمة (للخريطة)
-  const handleSelectSuggestion = (item: any) => {
-    const lat = parseFloat(item.lat);
-    const lon = parseFloat(item.lon);
-    const cleanName = item.display_name.split(",")[0] || "المؤسسة المستهدفة";
-
-    const city =
-      item.address?.city ||
-      item.address?.town ||
-      item.address?.village ||
-      item.address?.state ||
-      "غير محدد";
-    const fullAddress = item.display_name || "العنوان الكامل عبر الخريطة";
-
-    setMapCenter([lat, lon]);
-    setLatitude(lat);
-    setLongitude(lon);
-    setMosqueName(cleanName);
-    setMosqueCity(city);
-    setMosqueAddress(fullAddress);
-    setSearchQuery(item.display_name);
-    setHasSelectedMosque(true);
-    setSuggestions([]);
-  };
-
   const handleFirstStepSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim() || !email.trim() || !password) {
-      alert("يرجى ملء كافة الحقول الأساسية أولاً.");
+    if (!fullName.trim() || !email.trim() || !phone.trim() || !password) {
+      alert("يرجى ملء كافة الحقول الأساسية ورقم الهاتف أولاً.");
       return;
     }
     setCurrentStep(2);
   };
 
-  // عملية التسجيل وحقن البيانات التلقائية المتكاملة في جداول قاعدة البيانات
+  // عملية التسجيل
   async function handleRegister() {
-    if (uiRole === "school") {
-      if (!mosqueName.trim() || !mosqueCity.trim() || !mosqueAddress.trim()) {
-        setGeoError("يرجى ملء كافة بيانات المدرسة القرآنية المطلوبة.");
-        return;
-      }
-    } else {
-      if (!mosqueName || !latitude || !longitude) {
-        setGeoError(
-          "عذراً، يجب عليك اختيار المكان الحقيقي المسجل على الخريطة أولاً لتأكيد الحساب."
-        );
-        return;
-      }
+    if (!mosqueName.trim() || !mosqueCity.trim() || !mosqueMunicipality.trim() || !mosqueAddress.trim()) {
+      setGeoError("يرجى ملء كافة حقول المؤسسة (الاسم، الولاية، البلدية، العنوان التفصيلي).");
+      return;
     }
 
     try {
       setRegisterLoading(true);
       setGeoError("");
 
-      // 1. إنشاء حساب المستعمل في نظام مصادقة سوبابيس (Auth)
+      // 1. إنشاء حساب المستخدم في نظام المصادقة (Auth)
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
         password: password,
       });
 
       if (authError) throw authError;
-      if (!authData.user)
-        throw new Error("فشل إنشاء حساب المستخدم في نظام المصادقة.");
+      if (!authData.user) throw new Error("فشل إنشاء حساب المستخدم في نظام المصادقة.");
 
-      const imamUserId = authData.user.id;
+      const userId = authData.user.id;
+      const fullFormattedAddress = `${mosqueCity}، ${mosqueMunicipality}، ${mosqueAddress}`;
 
-      // 2. إدخال المستخدم أولاً في جدول profiles لتجنب كسر قيد الـ Foreign Key للمسجد/المدرسة
+      // 2. إدخال المستخدم في جدول profiles مع تثبيت role كـ "imam" بناءً على طلبك
       const { error: profileInitialErr } = await supabase
         .from("profiles")
         .insert({
-          id: imamUserId,
+          id: userId,
           full_name: fullName.trim(),
-          role: "imam", // تم التثبيت على "imam" لتجنب خطأ الـ Check Constraint
+          role: "imam", // الثلاثة لديهم نفس الدور في قاعدة البيانات
           email: email.trim(),
-          mosque_id: null, // نتركه فارغاً مؤقتاً لكسر حلقة التبعية المغلقة
+          phone: phone.trim(),
+          mosque_id: null,
           mosque_name: mosqueName.trim(),
+          status: "pending",
         });
 
       if (profileInitialErr) throw profileInitialErr;
 
-      // 3. توليد الـ slug الإنجليزي الديناميكي تلقائياً لاستخدامه مستقبلاً في روابط التسجيل و الـ QR
+      // 3. توليد الـ slug
       const generatedSlug = generateSlug(mosqueName.trim());
 
-      // 4. إدخال المدرسة/المسجد في جدول mosques
+      // 4. إدخال المؤسسة في جدول mosques
       const { data: mosqueData, error: mosqueInsertError } = await supabase
         .from("mosques")
         .insert({
           name: mosqueName.trim(),
           city: mosqueCity.trim(),
-          address: mosqueAddress.trim(),
-          formatted_address: mosqueAddress.trim(),
-          latitude: latitude,
-          longitude: longitude,
+          address: fullFormattedAddress,
+          formatted_address: fullFormattedAddress,
           slug: generatedSlug,
-          imam_id: imamUserId, // تم الربط بأمان الآن
+          imam_id: userId,
         })
         .select("id")
         .single();
 
       if (mosqueInsertError) {
-        // في حال فشل الإدخال نضمن تنظيف حساب الـ profile الذي أنشئ مؤقتاً
-        await supabase.from("profiles").delete().eq("id", imamUserId);
+        await supabase.from("profiles").delete().eq("id", userId);
         throw mosqueInsertError;
       }
 
       const newMosqueId = mosqueData.id;
 
-      // 5. الخطوة الأخيرة: تحديث حساب المستخدم بالـ mosque_id الفعلي المولد
+      // 5. تحديث جدول profiles بربط الـ mosque_id
       const { error: profileUpdateErr } = await supabase
         .from("profiles")
         .update({ mosque_id: newMosqueId })
-        .eq("id", imamUserId);
+        .eq("id", userId);
 
       if (profileUpdateErr) throw profileUpdateErr;
 
-      // التوجيه المباشر إلى لوحة التحكم الخاصة بالمشرف فور نجاح التسجيل
       router.push("/dashboard");
 
     } catch (err: any) {
-      console.error("خطأ مجمع أثناء عملية التسجيل البرمجية:", err);
-      setGeoError(
-        `فشل إتمام عملية التسجيل التلقائية: ${
-          err.message || "حدث خطأ داخلي في نظام الجداول"
-        }`
-      );
+      console.error("خطأ أثناء عملية التسجيل:", err);
+      setGeoError(`فشل إتمام عملية التسجيل: ${err.message || "حدث خطأ داخلي في النظام"}`);
     } finally {
       setRegisterLoading(false);
     }
   }
 
-  const getPlaceholderText = () => {
-    if (uiRole === "zawiya") return "اكتب اسم الزاوية والبلدية بدقة...";
-    if (uiRole === "school") return "اكتب اسم المدرسة القرآنية والبلدية بدقة...";
-    return "اكتب اسم المسجد والبلدية بدقة...";
-  };
-
-  const getLabelText = () => {
-    if (uiRole === "zawiya") return "اسم الزاوية الرسمي:";
-    if (uiRole === "school") return "اسم المدرسة القرآنية الرسمي:";
+  const getInstitutionLabel = () => {
+    if (uiRole === "شيخ زاوية") return "اسم الزاوية الرسمي:";
+    if (uiRole === "مدير مدرسة قرآنية") return "اسم المدرسة القرآنية الرسمي:";
     return "اسم المسجد الرسمي:";
   };
 
   return (
-    <main
-      className="min-h-screen flex items-center justify-center bg-[#f8fafc] p-6 text-slate-800"
-      dir="rtl"
-    >
+    <main className="min-h-screen flex items-center justify-center bg-[#f8fafc] p-6 text-slate-800" dir="rtl">
       <div className="bg-white rounded-3xl p-8 shadow-xl w-full max-w-xl border border-slate-100 transition-all duration-300">
-        {/* الخطوة الأولى: الحساب والبيانات الأساسية */}
+        
+        {/* الخطوة الأولى */}
         {currentStep === 1 && (
           <form onSubmit={handleFirstStepSubmit}>
             <h1 className="text-3xl font-black mb-2 text-center text-slate-900">
@@ -288,9 +186,9 @@ export default function RegisterPage() {
                   onChange={(e) => setUiRole(e.target.value)}
                   className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857] font-semibold"
                 >
-                  <option value="imam">إمام مشرف (مسجد)</option>
-                  <option value="zawiya">شيخ زاوية تعليمية</option>
-                  <option value="school">مدير مدرسة قرآنية</option>
+                  <option value="إمام مسجد">إمام مسجد</option>
+                  <option value="شيخ زاوية">شيخ زاوية</option>
+                  <option value="مدير مدرسة قرآنية">مدير مدرسة قرآنية</option>
                 </select>
               </div>
 
@@ -299,6 +197,15 @@ export default function RegisterPage() {
                 placeholder="البريد الإلكتروني"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
+                required
+              />
+
+              <input
+                type="tel"
+                placeholder="رقم الهاتف (مثال: 0550000000)"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
                 className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
                 required
               />
@@ -316,23 +223,21 @@ export default function RegisterPage() {
                 type="submit"
                 className="w-full bg-[#047857] hover:bg-[#065f46] text-white h-14 rounded-2xl font-bold transition-colors shadow-sm mt-4 flex items-center justify-center gap-2"
               >
-                {uiRole === "school"
-                  ? "التالي (إدخال بيانات المدرسة القرآنية) ──►"
-                  : "التالي (التحقق من المقر عبر الخريطة) ──►"}
+                التالي (إدخال تفاصيل المقر والمؤسسة) ──►
               </button>
             </div>
           </form>
         )}
 
-        {/* الخطوة الثانية: الإدخال اليدوي للمدرسة القرآنية */}
-        {currentStep === 2 && uiRole === "school" && (
+        {/* الخطوة الثانية */}
+        {currentStep === 2 && (
           <div className="space-y-6">
             <div>
               <h2 className="text-2xl font-black text-slate-900">
-                بيانات المدرسة القرآنية
+                بيانات المؤسسة أو المقر
               </h2>
               <p className="text-slate-500 text-sm mt-1">
-                أدخل بيانات الموقع والمدرسة القرآنية يدويّاً 🏫
+                يرجى إدخال اسم المقر والبيانات الجغرافية بدقة 🏫
               </p>
             </div>
 
@@ -345,11 +250,11 @@ export default function RegisterPage() {
             <div className="space-y-4">
               <div className="space-y-1">
                 <label className="text-sm font-bold text-slate-700">
-                  اسم المدرسة القرآنية الرسمي:
+                  {getInstitutionLabel()}
                 </label>
                 <input
                   type="text"
-                  placeholder="مثال: مدرسة الفرقان القرآنية"
+                  placeholder="مثال: مسجد الإحسان / زاوية سيدي أحمد"
                   value={mosqueName}
                   onChange={(e) => setMosqueName(e.target.value)}
                   className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
@@ -357,18 +262,34 @@ export default function RegisterPage() {
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-sm font-bold text-slate-700">
-                  المدينة / البلدية:
-                </label>
-                <input
-                  type="text"
-                  placeholder="مثال: سطيف"
-                  value={mosqueCity}
-                  onChange={(e) => setMosqueCity(e.target.value)}
-                  className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-bold text-slate-700">
+                    الولاية:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: سطيف"
+                    value={mosqueCity}
+                    onChange={(e) => setMosqueCity(e.target.value)}
+                    className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-sm font-bold text-slate-700">
+                    البلدية:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: العلمة"
+                    value={mosqueMunicipality}
+                    onChange={(e) => setMosqueMunicipality(e.target.value)}
+                    className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -377,7 +298,7 @@ export default function RegisterPage() {
                 </label>
                 <input
                   type="text"
-                  placeholder="مثال: حي 500 مسكن، طريق عين تبينت"
+                  placeholder="مثال: حي 500 مسكن، بجانب السوق المركزي"
                   value={mosqueAddress}
                   onChange={(e) => setMosqueAddress(e.target.value)}
                   className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
@@ -388,10 +309,12 @@ export default function RegisterPage() {
 
             <div className="flex items-center gap-4 pt-2">
               <button
+                type="button"
                 onClick={handleRegister}
                 disabled={
                   !mosqueName.trim() ||
                   !mosqueCity.trim() ||
+                  !mosqueMunicipality.trim() ||
                   !mosqueAddress.trim() ||
                   registerLoading
                 }
@@ -399,15 +322,12 @@ export default function RegisterPage() {
               >
                 {registerLoading
                   ? "جاري إكمال وتأمين الحساب..."
-                  : "تأكيد واعتماد المدرسة القرآنية 🔐"}
+                  : "تأكيد واعتماد الحساب 🔐"}
               </button>
+
               <button
-                onClick={() => {
-                  setCurrentStep(1);
-                  setMosqueName("");
-                  setMosqueCity("");
-                  setMosqueAddress("");
-                }}
+                type="button"
+                onClick={() => setCurrentStep(1)}
                 disabled={registerLoading}
                 className="px-6 h-14 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition-colors text-sm sm:text-base"
               >
@@ -417,126 +337,6 @@ export default function RegisterPage() {
           </div>
         )}
 
-        {/* الخطوة الثانية: خريطة التحقق للإمام أو شيخ الزاوية */}
-        {currentStep === 2 && uiRole !== "school" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-black text-slate-900">
-                التحقق من وجود المقر الفعلي
-              </h2>
-              <p className="text-slate-500 text-sm mt-1">
-                ابحث عن المقر رسميّاً على الخريطة ليقوم النظام باعتماده تلقائياً
-                ومنع التسجيل العشوائي 🔒
-              </p>
-            </div>
-
-            {geoError && (
-              <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-800 text-sm font-semibold text-center">
-                {geoError}
-              </div>
-            )}
-
-            <div className="space-y-2 relative">
-              <label
-                htmlFor="mosque-search-input"
-                className="text-sm font-bold text-slate-700"
-              >
-                ابحث عن الموقع بدقة:
-              </label>
-              <input
-                id="mosque-search-input"
-                name="mosque_search"
-                type="text"
-                autoComplete="off"
-                placeholder={getPlaceholderText()}
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setHasSelectedMosque(false);
-                  setMosqueName("");
-                  setMosqueCity("");
-                  setMosqueAddress("");
-                  setLatitude(null);
-                  setLongitude(null);
-                }}
-                className="w-full border border-slate-200 rounded-2xl px-4 h-14 bg-white text-slate-900 focus:outline-none focus:border-[#047857]"
-              />
-
-              {searchLoading && (
-                <div className="text-xs text-emerald-600 font-bold mt-1 animate-pulse">
-                  جاري فحص قاعدة البيانات الجغرافية...
-                </div>
-              )}
-
-              {suggestions.length > 0 && (
-                <div className="absolute z-[1000] w-full bg-white border border-slate-100 rounded-2xl shadow-xl max-h-60 overflow-y-auto mt-1 divide-y divide-slate-50">
-                  {suggestions.map((item, index) => (
-                    <div
-                      key={index}
-                      onClick={() => handleSelectSuggestion(item)}
-                      className="p-4 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors font-medium text-right"
-                    >
-                      Ref: 🕌 {item.display_name}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* الحاوية المستدعية للمكون الديناميكي المحمي بـ key فريد */}
-            <div className="rounded-2xl overflow-hidden border border-slate-100 h-64 shadow-inner z-10 relative">
-              <LeafletMap
-                key={`${mapCenter[0]}-${mapCenter[1]}`}
-                center={mapCenter}
-                zoom={hasSelectedMosque ? 16 : 6}
-              />
-            </div>
-
-            {mosqueName && (
-              <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 space-y-1.5">
-                <p className="text-xs text-emerald-800 font-bold">
-                  ✓ {getLabelText()}
-                </p>
-                <p className="text-base text-slate-800 font-black">
-                  🕌 {mosqueName}
-                </p>
-                <p className="text-xs text-slate-500 font-medium">
-                  📍 المدينة المستخرجة:{" "}
-                  <span className="font-bold text-slate-700">
-                    {mosqueCity}
-                  </span>
-                </p>
-              </div>
-            )}
-
-            <div className="flex items-center gap-4 pt-2">
-              <button
-                onClick={handleRegister}
-                disabled={!hasSelectedMosque || registerLoading}
-                className="flex-1 bg-[#047857] hover:bg-[#065f46] text-white h-14 rounded-2xl font-bold transition-colors shadow-sm disabled:opacity-50 text-sm sm:text-base"
-              >
-                {registerLoading
-                  ? "جاري بناء وتأمين الحساب..."
-                  : "تأكيد واعتماد المقر الرسمي 🔐"}
-              </button>
-              <button
-                onClick={() => {
-                  setCurrentStep(1);
-                  setHasSelectedMosque(false);
-                  setMosqueName("");
-                  setMosqueCity("");
-                  setMosqueAddress("");
-                  setLatitude(null);
-                  setLongitude(null);
-                }}
-                disabled={registerLoading}
-                className="px-6 h-14 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition-colors text-sm sm:text-base"
-              >
-                السابق
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </main>
   );
